@@ -1,3 +1,4 @@
+-- Configuration and Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -5,16 +6,19 @@ local player = Players.LocalPlayer
 local character = player.Character or player.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
+-- Orbit Variables
 local orbitDistance = 10
 local orbitSpeed = 5
 local orbitAngle = 0
 local targetPlayerName = ""
 local isOrbiting = false
 local dropdownMenu -- Variable to store the dropdown menu frame
+local guiVisible = false -- Tracks visibility of the GUI
 
 -- Create the Screen GUI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Parent = player:WaitForChild("PlayerGui")
+screenGui.Enabled = false  -- Initially, the GUI is not visible
 
 -- Create a Frame for the GUI with rounded corners
 local function createRoundedFrame(parent, size, position, backgroundColor)
@@ -103,7 +107,7 @@ end)
 local distanceBox = Instance.new("TextBox")
 distanceBox.PlaceholderText = "Orbit Distance"
 distanceBox.Size = UDim2.new(1, 0, 0, 50)
-distanceBox.Position = UDim2.new(0, 0, 0.3, 0) -- Adjust position to be below the speed box
+distanceBox.Position = UDim2.new(0, 0, 0.3, 0)
 distanceBox.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 distanceBox.BorderSizePixel = 0
 distanceBox.Font = Enum.Font.SourceSans
@@ -131,14 +135,11 @@ toggleButton.TextColor3 = Color3.new(1, 1, 1)
 toggleButton.TextSize = 20
 toggleButton.Parent = frame
 
-toggleButton.MouseEnter:Connect(function() hoverEffect(toggleButton, true) end)
-toggleButton.MouseLeave:Connect(function() hoverEffect(toggleButton, false) end)
-
 -- Create Dropdown Button for Select Player
 local dropdown = Instance.new("TextButton")
 dropdown.Text = "Select Player"
 dropdown.Size = UDim2.new(1, 0, 0, 50)
-dropdown.Position = UDim2.new(0, 0, 0.7, 0) -- Adjust position to be below the toggle button
+dropdown.Position = UDim2.new(0, 0, 0.7, 0)
 dropdown.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
 dropdown.BorderSizePixel = 0
 dropdown.Font = Enum.Font.SourceSansSemibold
@@ -146,13 +147,10 @@ dropdown.TextColor3 = Color3.new(1, 1, 1)
 dropdown.TextSize = 20
 dropdown.Parent = frame
 
--- Hover Effect for Button
+-- Hover Effect for Button (This function should be concatenated)
 local function hoverEffect(button, isHovered)
     button.BackgroundColor3 = isHovered and Color3.fromRGB(100, 100, 100) or Color3.fromRGB(80, 80, 80)
 end
-
-dropdown.MouseEnter:Connect(function() hoverEffect(dropdown, true) end)
-dropdown.MouseLeave:Connect(function() hoverEffect(dropdown, false) end)
 
 -- Function to update the player dropdown options
 local function updatePlayerDropdown()
@@ -165,7 +163,7 @@ local function updatePlayerDropdown()
     return playerNames
 end
 
--- Toggle dropdown visibility
+-- Toggle dropdown visibility function
 local function toggleDropdown()
     if dropdownMenu then
         dropdownMenu:Destroy() 
@@ -176,7 +174,7 @@ local function toggleDropdown()
         dropdownMenu.Size = UDim2.new(1, 0, 0, math.min(30 * #playerNames, 150))
         dropdownMenu.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
         dropdownMenu.BorderSizePixel = 0
-        dropdownMenu.Position = UDim2.new(0, 0, 1, -10) -- Position just below the dropdown button
+        dropdownMenu.Position = UDim2.new(0, 0, 1, -10) 
         dropdownMenu.Parent = dropdown
 
         local layout = Instance.new("UIListLayout")
@@ -254,5 +252,15 @@ RunService.Heartbeat:Connect(function(deltaTime)
         
         -- Set new position and orientation
         humanoidRootPart.CFrame = CFrame.new(targetPosition + offset) * CFrame.Angles(0, orbitAngle + math.pi / 2, 0)
+    end
+end)
+
+-- Listen for the 'B' key press to toggle the GUI
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.B then
+        guiVisible = not guiVisible
+        screenGui.Enabled = guiVisible -- Show or hide the GUI based on the toggle
     end
 end)
