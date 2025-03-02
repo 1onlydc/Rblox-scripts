@@ -1,11 +1,11 @@
 -- Antilock functionality
 getgenv().Sky = true -- disable or enable the antilock
-getgenv().SkyAmount = 90 -- how far it should be
+getgenv().SkyAmount = 90 -- how far it should be (negative for downward)
 
 game:GetService("RunService").heartbeat:Connect(function()
     if getgenv().Sky ~= false then 
         local vel = game.Players.LocalPlayer.Character.HumanoidRootPart.Velocity
-        game.Players.LocalPlayer.Character.HumanoidRootPart.Velocity = Vector3.new(0, getgenv().SkyAmount, 0) 
+        game.Players.LocalPlayer.Character.HumanoidRootPart.Velocity = Vector3.new(0, -getgenv().SkyAmount, 0) -- shoot down instead of up
         game:GetService("RunService").RenderStepped:Wait()
         game.Players.LocalPlayer.Character.HumanoidRootPart.Velocity = vel
     end 
