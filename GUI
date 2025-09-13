@@ -1,0 +1,643 @@
+-- Modern Roblox UI (Fixed + Animated Tabs + Insert Toggle + Smooth Draggable PanelsContainer + Blur Effect)
+-- Place in a LocalScript (StarterPlayerScripts / StarterGui etc.)
+
+-- Services
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local HttpService = game:GetService("HttpService")
+
+local Player = Players.LocalPlayer
+local PlayerGui = Player:WaitForChild("PlayerGui")
+
+-- Constants for layout
+local WIDTH_MAIN = 700
+local WIDTH_SIDE = 260
+local GAP = 20
+local HEIGHT = 450
+
+-- Performance optimizations (#6)
+local debounce = {}
+local connections = {}
+
+local function debounceCheck(id, cooldown)
+    cooldown = cooldown or 0.5
+    if debounce[id] and (os.clock() - debounce[id]) < cooldown then
+        return true
+    end
+    debounce[id] = os.clock()
+    return false
+end
+
+local function safeConnect(event, callback)
+    local connection = event:Connect(callback)
+    table.insert(connections, connection)
+    return connection
+end
+
+local function cleanup()
+    for _, connection in ipairs(connections) do
+        connection:Disconnect()
+    end
+    if blur and blur.Parent then
+        blur:Destroy()
+    end
+    if ScreenGui and ScreenGui.Parent then
+        ScreenGui:Destroy()
+    end
+end
+
+-- Utility helpers
+local function addCorner(obj, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 8)
+    c.Parent = obj
+    return c
+end
+
+local function addStroke(obj, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Thickness = thickness or 1
+    s.Color = color or Color3.fromRGB(60,60,60)
+    s.Transparency = 0.2
+    s.Parent = obj
+    return s
+end
+
+-- Notification System (#2)
+local function showNotification(title, message, duration, notifType)
+    duration = duration or 3
+    notifType = notifType or "info"
+    
+    local colorMap = {
+        info = Color3.fromRGB(0, 120, 215),
+        success = Color3.fromRGB(46, 204, 113),
+        warning = Color3.fromRGB(241, 196, 15),
+        error = Color3.fromRGB(231, 76, 60)
+    }
+    
+    local accentColor = colorMap[notifType] or colorMap.info
+    
+    local notification = Instance.new("Frame")
+    notification.Parent = ScreenGui
+    notification.Size = UDim2.new(0, 300, 0, 80)
+    notification.Position = UDim2.new(1, 0, 0.8, 0)
+    notification.BackgroundColor3 = Color3.fromRGB(25,25,25)
+    notification.BackgroundTransparency = 0.1
+    addCorner(notification, 8)
+    addStroke(notification)
+    
+    local accentBar = Instance.new("Frame")
+    accentBar.Parent = notification
+    accentBar.Size = UDim2.new(0, 5, 1, 0)
+    accentBar.Position = UDim2.new(0, 0, 0, 0)
+    accentBar.BackgroundColor3 = accentColor
+    addCorner(accentBar, 2)
+    
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Parent = notification
+    titleLabel.Size = UDim2.new(1, -20, 0, 20)
+    titleLabel.Position = UDim2.new(0, 15, 0, 10)
+    titleLabel.BackgroundTransparency = 1
+    titleLabel.Text = title
+    titleLabel.Font = Enum.Font.GothamBold
+    titleLabel.TextSize = 14
+    titleLabel.TextColor3 = Color3.fromRGB(230,230,230)
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local messageLabel = Instance.new("TextLabel")
+    messageLabel.Parent = notification
+    messageLabel.Size = UDim2.new(1, -20, 0, 40)
+    messageLabel.Position = UDim2.new(0, 15, 0, 30)
+    messageLabel.BackgroundTransparency = 1
+    messageLabel.Text = message
+    messageLabel.Font = Enum.Font.Gotham
+    messageLabel.TextSize = 12
+    messageLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    messageLabel.TextXAlignment = Enum.TextXAlignment.Left
+    messageLabel.TextWrapped = true
+    
+    -- Animate in
+    TweenService:Create(notification, TweenInfo.new(0.3), {
+        Position = UDim2.new(1, -320, 0.8, 0)
+    }):Play()
+    
+    -- Auto remove after duration
+    task.delay(duration, function()
+        if notification and notification.Parent then
+            TweenService:Create(notification, TweenInfo.new(0.3), {
+                Position = UDim2.new(1, 0, 0.8, 0)
+            }):Play()
+            task.delay(0.3, function()
+                if notification and notification.Parent then
+                    notification:Destroy()
+                end
+            end)
+        end
+    end)
+    
+    return notification
+end
+
+-- BLUR EFFECT SETUP
+local blur = Lighting:FindFirstChild("ModernUIBlur")
+if not blur then
+    blur = Instance.new("BlurEffect")
+    blur.Name = "ModernUIBlur"
+    blur.Size = 0 -- start unblurred
+    blur.Parent = Lighting
+end
+
+local function setBlur(enable)
+    if debounceCheck("setBlur", 0.1) then return end
+    
+    local target = enable and 24 or 0 -- 24 is strong blur
+    TweenService:Create(blur, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        Size = target
+    }):Play()
+end
+
+-- ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "ModernUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = PlayerGui
+
+-- Main container (starts hidden, slides in)
+local MainContainer = Instance.new("Frame")
+MainContainer.Name = "MainContainer"
+MainContainer.Parent = ScreenGui
+MainContainer.Size = UDim2.new(1,0,1,0)
+MainContainer.BackgroundTransparency = 1
+MainContainer.Position = UDim2.new(0,0,1,0)
+
+TweenService:Create(MainContainer, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+    Position = UDim2.new(0,0,0,0)
+}):Play()
+
+-- Show welcome notification
+task.delay(0.5, function()
+    showNotification("Modern UI", "Press TAB to toggle UI | INSERT to hide panels", 5, "info")
+end)
+
+-- Top NavBar
+local NavBar = Instance.new("Frame")
+NavBar.Name = "NavBar"
+NavBar.Parent = MainContainer
+NavBar.Size = UDim2.new(0,600,0,50)
+NavBar.Position = UDim2.new(0.5, -300, 0.02, 0)
+NavBar.BackgroundColor3 = Color3.fromRGB(25,25,25)
+NavBar.BackgroundTransparency = 0.1
+NavBar.BorderSizePixel = 0
+addCorner(NavBar, 12)
+addStroke(NavBar, Color3.fromRGB(80,80,80), 1)
+
+local navLayout = Instance.new("UIListLayout")
+navLayout.Parent = NavBar
+navLayout.FillDirection = Enum.FillDirection.Horizontal
+navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+navLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+navLayout.Padding = UDim.new(0,8)
+navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+-- Tabs
+local navButtons = {
+    {Name = "Aimbot", Icon = "rbxassetid://6031071053"},
+    {Name = "Visuals", Icon = "rbxassetid://6031094670"},
+    {Name = "Misc",   Icon = "rbxassetid://6031091004"},
+    {Name = "Other",  Icon = "rbxassetid://6031094679"},
+    {Name = "Settings", Icon = "rbxassetid://6031091001"},
+}
+
+-- Panels container (middle GUI)
+local PanelsContainer = Instance.new("Frame")
+PanelsContainer.Name = "PanelsContainer"
+PanelsContainer.Parent = MainContainer
+PanelsContainer.Size = UDim2.new(0, WIDTH_MAIN, 0, HEIGHT)
+PanelsContainer.Position = UDim2.new(0.5, -WIDTH_MAIN/2, 0.25, 0)
+PanelsContainer.BackgroundTransparency = 1
+PanelsContainer.Visible = true
+
+-- Create main panels
+local Panels = {}
+for _,info in ipairs(navButtons) do
+    local panel = Instance.new("Frame")
+    panel.Name = info.Name .. "Panel"
+    panel.Parent = PanelsContainer
+    panel.Size = UDim2.new(0, WIDTH_MAIN, 0, HEIGHT)
+    panel.Position = UDim2.new(0, 0, 0, 0)
+    panel.BackgroundColor3 = Color3.fromRGB(15,15,15)
+    panel.BackgroundTransparency = 0.05
+    addCorner(panel, 10)
+    panel.Visible = false
+
+    local header = Instance.new("TextLabel")
+    header.Name = "Header"
+    header.Parent = panel
+    header.Size = UDim2.new(1, 0, 0, 40)
+    header.Position = UDim2.new(0,0,0,0)
+    header.BackgroundTransparency = 1
+    header.Font = Enum.Font.GothamMedium
+    header.TextSize = 16
+    header.TextColor3 = Color3.fromRGB(230,230,230)
+    header.Text = info.Name
+
+    Panels[info.Name] = panel
+end
+
+Panels["Aimbot"].Visible = true
+
+-- SidePanel (optional, stays fixed)
+local SidePanel = Instance.new("Frame")
+SidePanel.Name = "SidePanel"
+SidePanel.Parent = PanelsContainer
+SidePanel.Size = UDim2.new(0, WIDTH_SIDE, 0, HEIGHT)
+SidePanel.Position = UDim2.new(0, WIDTH_MAIN + GAP, 0, 0)
+SidePanel.BackgroundColor3 = Color3.fromRGB(18,18,18)
+SidePanel.BackgroundTransparency = 0.05
+addCorner(SidePanel, 10)
+SidePanel.Visible = false
+
+-- SidePanel header and preview
+local SideHeader = Instance.new("Frame")
+SideHeader.Parent = SidePanel
+SideHeader.Size = UDim2.new(1,0,0,40)
+SideHeader.BackgroundTransparency = 1
+
+local SideHeaderLabel = Instance.new("TextLabel")
+SideHeaderLabel.Parent = SideHeader
+SideHeaderLabel.Size = UDim2.new(1,-20,1,0)
+SideHeaderLabel.Position = UDim2.new(0,10,0,0)
+SideHeaderLabel.BackgroundTransparency = 1
+SideHeaderLabel.Font = Enum.Font.GothamMedium
+SideHeaderLabel.TextSize = 16
+SideHeaderLabel.TextColor3 = Color3.fromRGB(230,230,230)
+SideHeaderLabel.Text = "3D Preview"
+
+local PreviewBox = Instance.new("Frame")
+PreviewBox.Parent = SidePanel
+PreviewBox.Size = UDim2.new(1,-20,1,-60)
+PreviewBox.Position = UDim2.new(0,10,0,50)
+PreviewBox.BackgroundColor3 = Color3.fromRGB(10,10,10)
+addCorner(PreviewBox, 8)
+
+-- Hamburger dropdown
+local hamburgerButton = nil
+local dropdownFrame = nil
+
+local function destroyDropdown()
+    if dropdownFrame and dropdownFrame.Parent then
+        dropdownFrame:Destroy()
+    end
+    dropdownFrame = nil
+end
+
+local function removeHamburger()
+    if hamburgerButton and hamburgerButton.Parent then
+        hamburgerButton:Destroy()
+    end
+    hamburgerButton = nil
+    destroyDropdown()
+end
+
+local function addHamburgerMenu()
+    removeHamburger()
+    SidePanel.Visible = true
+
+    hamburgerButton = Instance.new("Frame")
+    hamburgerButton.Name = "HamburgerButton"
+    hamburgerButton.Parent = SideHeader
+    hamburgerButton.Size = UDim2.new(0,30,0,24)
+    hamburgerButton.Position = UDim2.new(1,-40,0,8)
+    hamburgerButton.BackgroundTransparency = 1
+
+    for i=0,2 do
+        local line = Instance.new("Frame")
+        line.Parent = hamburgerButton
+        line.Size = UDim2.new(1,0,0,3)
+        line.Position = UDim2.new(0,0,0,i*7)
+        line.BackgroundColor3 = Color3.fromRGB(230,230,230)
+        addCorner(line,2)
+    end
+
+    local click = Instance.new("TextButton")
+    click.Parent = hamburgerButton
+    click.Size = UDim2.new(1,0,1,0)
+    click.BackgroundTransparency = 1
+    click.Text = ""
+    click.AutoButtonColor = false
+
+    click.MouseButton1Click:Connect(function()
+        if dropdownFrame and dropdownFrame.Parent then
+            destroyDropdown()
+            return
+        end
+        dropdownFrame = Instance.new("Frame")
+        dropdownFrame.Name = "HamburgerDropdown"
+        dropdownFrame.Parent = SidePanel
+        dropdownFrame.Size = UDim2.new(0,140,0,0)
+        dropdownFrame.Position = UDim2.new(1,-150,0,40)
+        dropdownFrame.BackgroundColor3 = Color3.fromRGB(28,28,28)
+        addCorner(dropdownFrame,8)
+        dropdownFrame.ClipsDescendants = true
+
+        local opt = Instance.new("TextLabel")
+        opt.Parent = dropdownFrame
+        opt.Size = UDim2.new(1,-10,0,28)
+        opt.Position = UDim2.new(0,5,0,5)
+        opt.BackgroundTransparency = 1
+        opt.Text = "Preview Option"
+        opt.Font = Enum.Font.GothamMedium
+        opt.TextSize = 14
+        opt.TextColor3 = Color3.fromRGB(230,230,230)
+        opt.TextXAlignment = Enum.TextXAlignment.Left
+
+        TweenService:Create(dropdownFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0,140,0,110)
+        }):Play()
+    end)
+end
+
+local function clearPreview()
+    removeHamburger()
+    SidePanel.Visible = false
+end
+
+local function updatePanelsContainer()
+    if debounceCheck("updatePanelsContainer", 0.1) then return end
+    
+    local targetWidth = WIDTH_MAIN
+    if SidePanel.Visible then
+        targetWidth = targetWidth + WIDTH_SIDE + GAP
+    end
+    local targetSize = UDim2.new(0,targetWidth,0,HEIGHT)
+    local targetPos = UDim2.new(0.5,-targetWidth/2,0.25,0)
+    TweenService:Create(PanelsContainer, TweenInfo.new(0.3,Enum.EasingStyle.Quad,Enum.EasingDirection.Out), {
+        Size = targetSize,
+        Position = targetPos
+    }):Play()
+end
+
+-- Active tab tracker
+local SIZE_NORMAL = UDim2.new(0,90,0,40)
+local SIZE_HOVER = UDim2.new(0,95,0,45)
+local SIZE_ACTIVE = UDim2.new(0,120,0,50)
+local SIZE_ACTIVE_HOVER = UDim2.new(0,130,0,55)
+local activeTab = nil
+
+-- Function to create nav buttons
+local function createNavButton(info,index)
+    local btn = Instance.new("TextButton")
+    btn.Name = info.Name.."Btn"
+    btn.Parent = NavBar
+    btn.Size = SIZE_NORMAL
+    btn.LayoutOrder = index
+    btn.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    btn.BackgroundTransparency = 0.2
+    btn.AutoButtonColor = false
+    btn.Text = ""
+    addCorner(btn,8)
+
+    local icon = Instance.new("ImageLabel")
+    icon.Parent = btn
+    icon.BackgroundTransparency = 1
+    icon.Image = info.Icon
+    icon.Size = UDim2.new(0,18,0,18)
+    icon.Position = UDim2.new(0,10,0.5,-9)
+
+    local label = Instance.new("TextLabel")
+    label.Parent = btn
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1,-35,1,0)
+    label.Position = UDim2.new(0,35,0,0)
+    label.Font = Enum.Font.GothamMedium
+    label.TextSize = 14
+    label.TextColor3 = Color3.fromRGB(230,230,230)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = info.Name
+
+    -- Hover
+    safeConnect(btn.MouseEnter, function()
+        local target = (activeTab==btn) and SIZE_ACTIVE_HOVER or SIZE_HOVER
+        TweenService:Create(btn,TweenInfo.new(0.12),{Size=target}):Play()
+    end)
+    
+    safeConnect(btn.MouseLeave, function()
+        local target = (activeTab==btn) and SIZE_ACTIVE or SIZE_NORMAL
+        TweenService:Create(btn,TweenInfo.new(0.12),{Size=target}):Play()
+    end)
+
+    -- Click
+    safeConnect(btn.MouseButton1Click, function()
+        if debounceCheck("tabClick", 0.2) then return end
+        
+        if activeTab==btn then
+            TweenService:Create(btn,TweenInfo.new(0.18),{Size=SIZE_NORMAL}):Play()
+            activeTab=nil
+            for _,p in pairs(Panels) do
+                if p.Visible then
+                    TweenService:Create(p,TweenInfo.new(0.22),{BackgroundTransparency=1}):Play()
+                    task.delay(0.22,function() p.Visible=false p.BackgroundTransparency=0.05 end)
+                end
+            end
+            clearPreview()
+            updatePanelsContainer()
+            showNotification("UI", "All panels closed", 2, "info")
+            return
+        end
+
+        if activeTab then
+            TweenService:Create(activeTab,TweenInfo.new(0.18),{Size=SIZE_NORMAL}):Play()
+        end
+
+        for _,p in pairs(Panels) do
+            if p.Visible then
+                TweenService:Create(p,TweenInfo.new(0.18),{BackgroundTransparency=1}):Play()
+                task.delay(0.18,function() p.Visible=false p.BackgroundTransparency=0.05 end)
+            end
+        end
+
+        local target = Panels[info.Name]
+        target.Visible = true
+        target.BackgroundTransparency = 1
+        TweenService:Create(target,TweenInfo.new(0.22),{BackgroundTransparency=0.05}):Play()
+        TweenService:Create(btn,TweenInfo.new(0.18),{Size=SIZE_ACTIVE}):Play()
+        activeTab=btn
+
+        clearPreview()
+        if info.Name=="Visuals" then
+            SidePanel.Visible=true
+            SidePanel.BackgroundTransparency=1
+            TweenService:Create(SidePanel,TweenInfo.new(0.22),{BackgroundTransparency=0.05}):Play()
+            addHamburgerMenu()
+        else
+            if SidePanel.Visible then
+                TweenService:Create(SidePanel,TweenInfo.new(0.18),{BackgroundTransparency=1}):Play()
+                task.delay(0.18,function() SidePanel.Visible=false SidePanel.BackgroundTransparency=0.05 end)
+            end
+        end
+
+        updatePanelsContainer()
+        showNotification("Tab", "Opened "..info.Name.." panel", 2, "success")
+    end)
+
+    return btn
+end
+
+for i,info in ipairs(navButtons) do
+    createNavButton(info,i)
+end
+
+-- Status bar
+local StatusBar = Instance.new("Frame")
+StatusBar.Name = "StatusBar"
+StatusBar.Parent = MainContainer
+StatusBar.Size = UDim2.new(1,0,0,25)
+StatusBar.Position = UDim2.new(0,0,1,-25)
+StatusBar.BackgroundColor3 = Color3.fromRGB(28,28,28)
+addCorner(StatusBar,0)
+
+local StatusText = Instance.new("TextLabel")
+StatusText.Parent = StatusBar
+StatusText.Size = UDim2.new(1,-10,1,0)
+StatusText.Position = UDim2.new(0,5,0,0)
+StatusText.BackgroundTransparency = 1
+StatusText.Font = Enum.Font.GothamMedium
+StatusText.TextSize = 14
+StatusText.TextColor3 = Color3.fromRGB(200,200,200)
+StatusText.TextXAlignment = Enum.TextXAlignment.Left
+StatusText.Text = "Status: Ready"
+
+safeConnect(RunService.RenderStepped, function(dt)
+    if dt>0 then
+        local fps = 1/dt
+        StatusText.Text = string.format("FPS: %.0f | Status: Ready",fps)
+    end
+end)
+
+-- TAB / INSERT toggles
+local guiVisible=true
+local panelsVisible=true
+
+-- Apply blur when GUI is first shown
+setBlur(true)
+
+safeConnect(UserInputService.InputBegan, function(input,gpe)
+    if gpe then return end
+    if input.KeyCode==Enum.KeyCode.Tab then
+        if debounceCheck("tabToggle", 0.3) then return end
+        
+        guiVisible = not guiVisible
+        local targetPos = guiVisible and UDim2.new(0,0,0,0) or UDim2.new(0,0,1,0)
+        TweenService:Create(MainContainer,TweenInfo.new(0.3),{Position=targetPos}):Play()
+        setBlur(guiVisible)
+        showNotification("UI", guiVisible and "UI shown" or "UI hidden", 2, "info")
+    end
+    if input.KeyCode==Enum.KeyCode.Insert then
+        if debounceCheck("insertToggle", 0.3) then return end
+        
+        panelsVisible = not panelsVisible
+        if panelsVisible then
+            NavBar.Visible=true
+            PanelsContainer.Visible=true
+            TweenService:Create(NavBar,TweenInfo.new(0.25),{BackgroundTransparency=0.1}):Play()
+            for _,p in pairs(Panels) do
+                if p.Visible then
+                    p.BackgroundTransparency=1
+                    TweenService:Create(p,TweenInfo.new(0.25),{BackgroundTransparency=0.05}):Play()
+                end
+            end
+            if SidePanel.Visible then
+                SidePanel.BackgroundTransparency=1
+                TweenService:Create(SidePanel,TweenInfo.new(0.25),{BackgroundTransparency=0.05}):Play()
+            end
+            updatePanelsContainer()
+            setBlur(true)
+            showNotification("Panels", "Panels shown", 2, "success")
+        else
+            TweenService:Create(NavBar,TweenInfo.new(0.25),{BackgroundTransparency=1}):Play()
+            for _,p in pairs(Panels) do
+                if p.Visible then
+                    TweenService:Create(p,TweenInfo.new(0.25),{BackgroundTransparency=1}):Play()
+                end
+            end
+            if SidePanel.Visible then
+                TweenService:Create(SidePanel,TweenInfo.new(0.25),{BackgroundTransparency=1}):Play()
+            end
+            task.delay(0.26,function()
+                if not panelsVisible then
+                    NavBar.Visible=false
+                    PanelsContainer.Visible=false
+                    setBlur(false)
+                    showNotification("Panels", "Panels hidden", 2, "info")
+                end
+            end)
+        end
+    end
+end)
+
+-- Player death resets blur
+safeConnect(Player.CharacterAdded, function()
+    setBlur(false)
+end)
+
+-- Cleanup on player leaving
+safeConnect(Player.AncestryChanged, function()
+    if not Player.Parent then
+        cleanup()
+    end
+end)
+
+-- ===========================
+-- Smooth draggable PanelsContainer (fixed jump)
+-- ===========================
+local dragging = false
+local dragInput, startMousePos, startFramePos
+
+local function updatePosition()
+    local mousePos = UserInputService:GetMouseLocation()
+    local delta = Vector2.new(mousePos.X - startMousePos.X, mousePos.Y - startMousePos.Y)
+    local targetPos = UDim2.new(
+        0,
+        startFramePos.X.Offset + delta.X,
+        0,
+        startFramePos.Y.Offset + delta.Y
+    )
+    PanelsContainer.Position = targetPos
+end
+
+for _, panel in pairs(Panels) do
+    local header = panel:FindFirstChild("Header")
+    if header then
+        safeConnect(header.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                startMousePos = UserInputService:GetMouseLocation()
+                local absPos = PanelsContainer.AbsolutePosition
+                startFramePos = UDim2.new(0, absPos.X, 0, absPos.Y)
+
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        dragging = false
+                        showNotification("UI", "Panel position updated", 1.5, "success")
+                    end
+                end)
+            end
+        end)
+        
+        safeConnect(header.InputChanged, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement then
+                dragInput = input
+            end
+        end)
+    end
+end
+
+safeConnect(UserInputService.InputChanged, function(input)
+    if dragging and input == dragInput then
+        updatePosition()
+    end
+end)
