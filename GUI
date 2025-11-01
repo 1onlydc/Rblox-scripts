@@ -1,1 +1,4005 @@
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+local VirtualUser = game:GetService("VirtualUser")
+local StarterGui = game:GetService("StarterGui")
+local Debris = game:GetService("Debris")
 
+local localPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local themeColor = Color3.fromRGB(80, 255, 80)
+
+function GetCurrentTime()
+	return os.date("%H:%M:%S")
+end
+
+function GetCurrentDate()
+	return os.date("%Y-%m-%d")
+end
+
+local function SafeCall(func, ...)
+	local success, result = pcall(func, ...)
+	if not success then
+		warn("NerdWareOS Error: " .. tostring(result))
+		return false
+	end
+	return true, result
+end
+
+local function SafeWaitForChild(parent, childName, timeout)
+	timeout = timeout or 5
+	local child = parent:FindFirstChild(childName)
+	if child then return child end
+
+	local start = tick()
+	while not child and tick() - start < timeout do
+		child = parent:FindFirstChild(childName)
+		if child then return child end
+		task.wait()
+	end
+	return nil
+end
+
+local NativeNotifier = {
+	Enabled = true,
+	LastSent = 0,
+	SuccessCount = 0,
+	FailureCount = 0
+}
+
+local FallbackGui = nil
+function CreateFallbackGui()
+	if FallbackGui then return end
+	FallbackGui = Instance.new("ScreenGui")
+	FallbackGui.Parent = game:GetService("CoreGui")
+	FallbackGui.Name = "NerdWareNotifs"
+	FallbackGui.ResetOnSpawn = false
+end
+
+function ShowFallbackNotif(title, message, duration)
+	CreateFallbackGui()
+	local notif = Instance.new("Frame")
+	notif.Parent = FallbackGui
+	notif.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	notif.BackgroundTransparency = 0.3
+	notif.BorderColor3 = Color3.fromRGB(255, 255, 255)
+	notif.BorderSizePixel = 2
+	notif.Position = UDim2.new(0.5, -150, 0, 50)
+	notif.Size = UDim2.new(0, 300, 0, 80)
+
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Parent = notif
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.Size = UDim2.new(1, 0, 0.4, 0)
+	titleLabel.Font = Enum.Font.SourceSansBold
+	titleLabel.Text = title
+	titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	titleLabel.TextSize = 16
+	titleLabel.TextWrapped = true
+
+	local msgLabel = Instance.new("TextLabel")
+	msgLabel.Parent = notif
+	msgLabel.BackgroundTransparency = 1
+	msgLabel.Position = UDim2.new(0, 0, 0.4, 0)
+	msgLabel.Size = UDim2.new(1, 0, 0.6, 0)
+	msgLabel.Font = Enum.Font.SourceSans
+	msgLabel.Text = message
+	msgLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	msgLabel.TextSize = 12
+	msgLabel.TextWrapped = true
+
+	notif.Position = UDim2.new(0.5, -150, 0, -100)
+	local tweenIn = TweenService:Create(notif, TweenInfo.new(0.5, Enum.EasingStyle.Back), {Position = UDim2.new(0.5, -150, 0, 50)})
+	tweenIn:Play()
+
+	task.wait(duration or 5)
+	local tweenOut = TweenService:Create(notif, TweenInfo.new(0.3), {Position = UDim2.new(0.5, -150, 0, -100)})
+	tweenOut:Play()
+	tweenOut.Completed:Connect(function() notif:Destroy() end)
+end
+
+function NativeNotifier.Notify(title, message, duration)
+	if not NativeNotifier.Enabled then return false end
+	if tick() - NativeNotifier.LastSent < 1 then return false end
+
+	local sent = false
+	pcall(function()
+		StarterGui:SetCore("SendNotification", {
+			Title = title,
+			Text = message,
+			Duration = duration or 5
+		})
+		sent = true
+	end)
+
+	if not sent then
+		ShowFallbackNotif(title, message, duration or 5)
+		NativeNotifier.FailureCount = NativeNotifier.FailureCount + 1
+		if TerminalFrame and CreateTerminalMessage then
+			CreateTerminalMessage(GetCurrentTime(), "[NOTIF]", "Used fallback GUI for: " .. title, Color3.fromRGB(255, 150, 100))
+		end
+	else
+		NativeNotifier.SuccessCount = NativeNotifier.SuccessCount + 1
+	end
+
+	NativeNotifier.LastSent = tick()
+
+	if TerminalFrame and CreateTerminalMessage then
+		CreateTerminalMessage(GetCurrentTime(), "[NOTIF]", title .. ": " .. message, Color3.fromRGB(100, 255, 100))
+	end
+
+	return sent
+end
+
+task.spawn(function()
+	task.wait(3)
+
+	local gameName = "Unknown Game"
+	local mps = game:GetService("MarketplaceService")
+	local success, info = pcall(function()
+		return mps:GetProductInfo(game.PlaceId)
+	end)
+	if success and info then
+		gameName = info.Name
+	end
+
+	-- Removed executor info from the native notification
+	local testSuccess = NativeNotifier.Notify(
+		"🚀 NerdWareOS Ready (WIP)", 
+		localPlayer.Name .. " loaded v1.0 in " .. gameName .. " (Place: " .. game.PlaceId .. " | Server: " .. game.JobId:sub(1, 8) .. ")", 
+		6
+	)
+
+	if TerminalFrame and CreateTerminalMessage then
+		CreateTerminalMessage(GetCurrentTime(), "[NOTIF]", "✓ Native notifier test: " .. (testSuccess and "Success" or "Fallback used"), Color3.fromRGB(100, 255, 100))
+	end
+
+	-- Get executor information
+	local executor = "Unknown Executor"
+	pcall(function()
+		executor = identifyexecutor() or "Unknown Executor"
+	end)
+
+	-- Create a separate notification with executor information using the custom notification system
+	task.wait(1) -- Small delay to ensure the GUI is loaded
+	if ShowNotification then
+		ShowNotification(
+			"🔍 Executor Detected", 
+			"Running on: " .. executor, 
+			5
+		)
+	end
+end)
+
+local AntiDetection = {
+	RandomDelays = true,
+	ExecutionTiming = true,
+	LastExecution = tick(),
+	ExecutionCount = 0
+}
+
+local function RandomizeExecution()
+	if AntiDetection.RandomDelays then
+		local randomDelay = math.random(50, 500) / 1000
+		task.wait(randomDelay)
+	end
+end
+
+local function TrackExecution()
+	AntiDetection.ExecutionCount = AntiDetection.ExecutionCount + 1
+	AntiDetection.LastExecution = tick()
+
+	if AntiDetection.ExecutionTiming and AntiDetection.ExecutionCount % 10 == 0 then
+		task.wait(math.random(100, 1000) / 1000)
+	end
+end
+
+local CloudSave = {
+	Enabled = true,
+	API_URL = "https://cd4e6a77-b67e-4657-b4ef-3755a772acff-00-1sks0mr6t5hwp.janeway.replit.dev",
+	API_KEY = "nerdware-secure-2025",
+	AutoSave = true,
+	AutoSaveInterval = 300,
+	LastSave = 0
+}
+
+local function GetCloudData()
+	if not State then
+		State = _G.AdminPanelState or {}
+	end
+
+	local data = {
+		player_id = localPlayer.UserId,
+		player_name = localPlayer.Name,
+		settings = {
+			WalkSpeed = State.WalkSpeed or 16,
+			JumpPower = State.JumpPower or 50,
+			Theme = State.Theme or "Blue",
+			ESPEnabled = State.ESPEnabled or false,
+			Fullbright = State.Fullbright or false,
+			Notifications = State.Notifications or true,
+			AutoSave = State.AutoSave or true
+		},
+		stats = {
+			CommandsUsed = State.CommandsUsed or 0,
+			TimeSpent = math.floor(tick() - (State.StartTime or tick())),
+			LastJoin = os.date("%Y-%m-%d %H:%M:%S")
+		}
+	}
+	return data
+end
+
+local function SaveToCloud()
+	if not CloudSave.Enabled then 
+		if TerminalFrame then
+			CreateTerminalMessage(GetCurrentTime(), "[CLOUD]", "Cloud save is disabled", Color3.fromRGB(255, 180, 100))
+		end
+		return 
+	end
+
+	local data = GetCloudData()
+	SafeCall(function()
+		local response = HttpService:RequestAsync({
+			Url = CloudSave.API_URL .. "/save",
+			Method = "POST",
+			Headers = {
+				["Content-Type"] = "application/json",
+				["Authorization"] = "Bearer " .. CloudSave.API_KEY
+			},
+			Body = HttpService:JSONEncode(data)
+		})
+
+		if response and response.Success then
+			CloudSave.LastSave = tick()
+			if TerminalFrame then
+				CreateTerminalMessage(GetCurrentTime(), "[CLOUD]", "Settings saved to cloud", Color3.fromRGB(100, 255, 100))
+			end
+			NativeNotifier.Notify("Cloud Save", localPlayer.Name .. " saved settings to cloud", 3)
+		else
+			if TerminalFrame then
+				CreateTerminalMessage(GetCurrentTime(), "[CLOUD]", "Cloud save failed (check API)", Color3.fromRGB(255, 100, 100))
+			end
+		end
+	end)
+end
+
+local function LoadFromCloud()
+	if not CloudSave.Enabled then 
+		if TerminalFrame then
+			CreateTerminalMessage(GetCurrentTime(), "[CLOUD]", "Cloud save is disabled", Color3.fromRGB(255, 180, 100))
+		end
+		return 
+	end
+
+	if not State then
+		State = _G.AdminPanelState or {}
+	end
+
+	SafeCall(function()
+		local response = HttpService:RequestAsync({
+			Url = CloudSave.API_URL .. "/load?player_id=" .. localPlayer.UserId,
+			Method = "GET",
+			Headers = {
+				["Authorization"] = "Bearer " .. CloudSave.API_KEY
+			}
+		})
+
+		if response and response.Success then
+			local data = HttpService:JSONDecode(response.Body)
+			if data and data.settings then
+				for key, value in pairs(data.settings) do
+					State[key] = value
+				end
+				if TerminalFrame then
+					CreateTerminalMessage(GetCurrentTime(), "[CLOUD]", "Settings loaded from cloud", Color3.fromRGB(100, 255, 100))
+				end
+				NativeNotifier.Notify("Cloud Load", localPlayer.Name .. " loaded settings from cloud", 3)
+			else
+				if TerminalFrame then
+					CreateTerminalMessage(GetCurrentTime(), "[CLOUD]", "Invalid cloud data format", Color3.fromRGB(255, 180, 100))
+				end
+			end
+		else
+			if TerminalFrame then
+				CreateTerminalMessage(GetCurrentTime(), "[CLOUD]", "No cloud data found or API error", Color3.fromRGB(255, 180, 100))
+			end
+		end
+	end)
+end
+
+local AntiAFK = {
+	Enabled = true,
+	ActionInterval = 120,
+	LastAction = tick()
+}
+
+local function PreventAFK()
+	if not AntiAFK.Enabled then return end
+
+	if tick() - AntiAFK.LastAction > AntiAFK.ActionInterval then
+		SafeCall(function()
+			VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+			task.wait(0.1)
+			VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+		end)
+		AntiAFK.LastAction = tick()
+
+		if TerminalFrame then
+			CreateTerminalMessage(GetCurrentTime(), "[ANTI-AFK]", "AFK prevention triggered", Color3.fromRGB(100, 200, 255))
+		end
+	end
+end
+
+SafeCall(function()
+	localPlayer.Idled:Connect(function(time)
+		if AntiAFK.Enabled and time > 60 then
+			VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+			task.wait(0.1)
+			VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+			if TerminalFrame then
+				CreateTerminalMessage(GetCurrentTime(), "[ANTI-AFK]", "Prevented AFK kick", Color3.fromRGB(100, 200, 255))
+			end
+		end
+	end)
+end)
+
+local GUIProtection = {
+	Enabled = true,
+	ProtectionKey = "GUI_Protect_" .. math.random(10000, 99999),
+	LastCheck = tick(),
+	CheckInterval = 5
+}
+
+local function ProtectGUI(gui)
+	if not GUIProtection.Enabled or not gui then return end
+
+	local protection = Instance.new("StringValue")
+	protection.Name = GUIProtection.ProtectionKey
+	protection.Value = os.time()
+	protection.Parent = gui
+
+	gui.ChildRemoved:Connect(function(child)
+		if child.Name == GUIProtection.ProtectionKey then
+			if TerminalFrame then
+				CreateTerminalMessage(GetCurrentTime(), "[PROTECTION]", "GUI tampered with - restoring", Color3.fromRGB(255, 100, 100))
+			end
+
+			task.delay(0.1, function()
+				if gui and gui.Parent then
+					local newProtection = Instance.new("StringValue")
+					newProtection.Name = GUIProtection.ProtectionKey
+					newProtection.Value = os.time()
+					newProtection.Parent = gui
+				end
+			end)
+		end
+	end)
+
+	if gui:FindFirstChild("MainFrame") then
+		local mainFrame = gui.MainFrame
+		local originalPosition = mainFrame.Position
+		local originalSize = mainFrame.Size
+
+		task.spawn(function()
+			while task.wait(GUIProtection.CheckInterval) do
+				if not gui or not gui.Parent then
+					if TerminalFrame then
+						CreateTerminalMessage(GetCurrentTime(), "[PROTECTION]", "GUI destroyed - attempting recovery", Color3.fromRGB(255, 100, 100))
+					end
+					break
+				end
+
+				-- Only restore size, not position (to allow dragging without snapping back)
+				if mainFrame.Size ~= originalSize then
+					if TerminalFrame then
+						CreateTerminalMessage(GetCurrentTime(), "[PROTECTION]", "GUI size modified - restoring", Color3.fromRGB(255, 180, 100))
+					end
+					mainFrame.Size = originalSize
+				end
+			end
+		end)
+	end
+end
+
+_G.AdminPanelState = _G.AdminPanelState or {
+	StartTime = tick(),
+	GodMode = false,
+	InfiniteJump = false,
+	NoClip = false,
+	Flying = false,
+	ESPEnabled = false,
+	Fullbright = false,
+	WalkSpeed = 16,
+	JumpPower = 50,
+	Viewing = false,
+	TargetPlayer = nil,
+	BangMode = false,
+	BangTarget = nil,
+	BangAnimation = nil,
+	CommandHistory = {},
+	Notifications = true,
+	AutoSave = true,
+	Theme = "Green",
+	CamlockEnabled = false,
+	CamlockKey = "Q",
+	CamlockTarget = nil,
+	CamlockPrediction = 0.12,
+	StickyAim = false,
+	AimAssist = false,
+	CommandsUsed = 0,
+	TriggerBotEnabled = false,
+	TriggerBotKey = "T",
+	FovEnabled = false,
+	FovSize = 90,
+	HoverUIEnabled = false,
+	SpinBotEnabled = false,
+	LookAtEnabled = false,
+	DamageNumbersEnabled = false,
+	ForceResetEnabled = false,
+	HitSoundEnabled = false,
+	HitSoundType = "Default",
+	AutoReloadEnabled = false,
+	SilentReloadEnabled = false,
+	-- New ESP settings
+	ESPTeamCheck = false,
+	ESPWallCheck = true,
+	ESPAliveCheck = true,
+	ESPBoxType = "2D",
+	-- New Aimbot settings
+	AimbotTeamCheck = false,
+	AimbotWallCheck = true,
+	AimbotAliveCheck = true,
+	-- New Visual settings
+	AvatarForcefieldEnabled = false,
+	AmbienceEnabled = false,
+	AmbienceBrightness = 1,
+	AmbienceFogEnd = 1000,
+	AmbienceTimeOfDay = 14,
+	AmbientColor = Color3.fromRGB(128, 128, 128),
+	OutdoorAmbientColor = Color3.fromRGB(128, 128, 128),
+	ColorShiftBottom = Color3.fromRGB(0, 0, 0),
+	ColorShiftTop = Color3.fromRGB(0, 0, 0),
+	FogColor = Color3.fromRGB(192, 192, 192),
+	-- New Movement Features
+	SpeedEnabled = false,
+	SpeedKeybind = "V",
+	SpeedAmount = 150,
+	FlyEnabled = false,
+	FlyKeybind = "B",
+	FlyAmount = 250,
+	FlyV2Enabled = false,
+	FlyV2Keybind = "X",
+	FlyV2Amount = 10,
+	NoJumpCooldownEnabled = false,
+	AntiSlowEnabled = false,
+	SpinBotSpeed = 50
+}
+
+local State = _G.AdminPanelState
+
+-- Movement variables
+local movement = {
+	speed = {
+		enabled = false,
+		keybind = Enum.KeyCode.V,
+		amount = 150
+	},
+	fly = {
+		enabled = false,
+		keybind = Enum.KeyCode.B,
+		amount = 250
+	},
+	flyV2 = {
+		enabled = false,
+		keybind = Enum.KeyCode.X,
+		amount = 10,
+		flying = false,
+		keys = {w = false, d = false, s = false, a = false},
+		core = nil,
+		weld = nil,
+		bodyPosition = nil,
+		bodyGyro = nil
+	},
+	spinBot = {
+		enabled = false,
+		speed = 50,
+		angularVelocity = nil
+	},
+	noJumpCooldown = false,
+	antiSlow = false
+}
+
+-- Utility functions
+local function hasCharacter(player)
+	local character = player and player.Character
+	return character and character:FindFirstChild("HumanoidRootPart", true) and character:FindFirstChild("Humanoid", true)
+end
+
+-- Speed functions
+local function updateCframeSpeed(deltaTime)
+	if movement.speed.enabled and hasCharacter(localPlayer) then
+		local character = localPlayer.Character
+		local hrp = character:FindFirstChild("HumanoidRootPart", true)
+		local humanoid = character:FindFirstChild("Humanoid", true)
+		local moveDirection = humanoid and humanoid.MoveDirection
+
+		if hrp and moveDirection then
+			local movementVector = moveDirection.Unit * movement.speed.amount * deltaTime
+			if movementVector.Magnitude > 0 then
+				hrp.CFrame = hrp.CFrame + movementVector
+			end
+		end
+	end
+end
+
+-- Fly functions
+local function updateFly(deltaTime)
+	if movement.fly.enabled and hasCharacter(localPlayer) then
+		local character = localPlayer.Character
+		local hrp = character:FindFirstChild("HumanoidRootPart", true)
+		local moveDirection = character:FindFirstChild("Humanoid", true).MoveDirection
+
+		-- Vertical movement based on key input
+		local verticalSpeed = (UserInputService:IsKeyDown(Enum.KeyCode.Space) and 1 or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and -1 or 0)
+		local verticalMovement = Vector3.new(0, verticalSpeed, 0)
+
+		-- Combine horizontal and vertical movement for consistent speed
+		local movementVector = (moveDirection + verticalMovement).Unit * movement.fly.amount * deltaTime
+
+		-- Update position using CFrame
+		if movementVector.Magnitude > 0 then
+			hrp.CFrame = hrp.CFrame + movementVector
+		end
+
+		-- Adjust velocity to prevent conflicts
+		hrp.Velocity = Vector3.zero
+	end
+end
+
+-- Fly V2 functions
+local function startFlyingV2()
+	if not hasCharacter(localPlayer) then return end
+
+	local character = localPlayer.Character
+	local hrp = character:FindFirstChild("HumanoidRootPart", true)
+
+	-- Core Part for flight
+	movement.flyV2.core = Instance.new("Part")
+	movement.flyV2.core.Name = "FlyV2Core"
+	movement.flyV2.core.Size = Vector3.new(0.05, 0.05, 0.05)
+	movement.flyV2.core.Transparency = 1
+	movement.flyV2.core.CanCollide = false
+	movement.flyV2.core.Parent = workspace
+
+	movement.flyV2.weld = Instance.new("Weld", movement.flyV2.core)
+	movement.flyV2.weld.Part0 = movement.flyV2.core
+	movement.flyV2.weld.Part1 = hrp
+	movement.flyV2.weld.C0 = CFrame.new(0, 0, 0)
+
+	-- BodyPosition and BodyGyro for controlling movement
+	movement.flyV2.bodyPosition = Instance.new("BodyPosition", movement.flyV2.core)
+	movement.flyV2.bodyPosition.Name = "FlyV2Position"
+	movement.flyV2.bodyPosition.maxForce = Vector3.new(math.huge, math.huge, math.huge)
+	movement.flyV2.bodyPosition.position = movement.flyV2.core.Position
+
+	movement.flyV2.bodyGyro = Instance.new("BodyGyro", movement.flyV2.core)
+	movement.flyV2.bodyGyro.Name = "FlyV2Gyro"
+	movement.flyV2.bodyGyro.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+	movement.flyV2.bodyGyro.cframe = movement.flyV2.core.CFrame
+
+	movement.flyV2.flying = true
+	character:FindFirstChild("Humanoid", true).PlatformStand = true
+end
+
+local function stopFlyingV2()
+	if not hasCharacter(localPlayer) then return end
+
+	movement.flyV2.flying = false
+
+	if movement.flyV2.bodyGyro then
+		movement.flyV2.bodyGyro:Destroy()
+		movement.flyV2.bodyGyro = nil
+	end
+
+	if movement.flyV2.bodyPosition then
+		movement.flyV2.bodyPosition:Destroy()
+		movement.flyV2.bodyPosition = nil
+	end
+
+	if movement.flyV2.weld then
+		movement.flyV2.weld:Destroy()
+		movement.flyV2.weld = nil
+	end
+
+	if movement.flyV2.core then
+		movement.flyV2.core:Destroy()
+		movement.flyV2.core = nil
+	end
+
+	localPlayer.Character:FindFirstChild("Humanoid", true).PlatformStand = false
+end
+
+local function updateFlyV2()
+	if not movement.flyV2.flying or not movement.flyV2.core then return end
+
+	local character = localPlayer.Character
+	local humanoid = character:FindFirstChild("Humanoid", true)
+	local hrp = character:FindFirstChild("HumanoidRootPart", true)
+
+	if not humanoid or not hrp then return end
+
+	humanoid.PlatformStand = true
+
+	local newPos = movement.flyV2.bodyGyro.cframe - movement.flyV2.bodyGyro.cframe.p + movement.flyV2.bodyPosition.position
+
+	-- Horizontal and vertical movement
+	if movement.flyV2.keys.w then
+		newPos = newPos + workspace.CurrentCamera.CoordinateFrame.lookVector * movement.flyV2.amount
+	end
+	if movement.flyV2.keys.s then
+		newPos = newPos - workspace.CurrentCamera.CoordinateFrame.lookVector * movement.flyV2.amount
+	end
+	if movement.flyV2.keys.d then
+		newPos = newPos * CFrame.new(movement.flyV2.amount, 0, 0)
+	end
+	if movement.flyV2.keys.a then
+		newPos = newPos * CFrame.new(-movement.flyV2.amount, 0, 0)
+	end
+
+	movement.flyV2.bodyPosition.position = newPos.p
+
+	-- Adjust the rotation
+	if movement.flyV2.keys.w then
+		movement.flyV2.bodyGyro.cframe = workspace.CurrentCamera.CoordinateFrame * CFrame.Angles(-math.rad(movement.flyV2.amount * 0), 0, 0)
+	elseif movement.flyV2.keys.s then
+		movement.flyV2.bodyGyro.cframe = workspace.CurrentCamera.CoordinateFrame * CFrame.Angles(math.rad(movement.flyV2.amount * 0), 0, 0)
+	else
+		movement.flyV2.bodyGyro.cframe = workspace.CurrentCamera.CoordinateFrame
+	end
+end
+
+-- SpinBot functions
+local function applySpinBot()
+	if not movement.spinBot.enabled or not hasCharacter(localPlayer) then
+		if movement.spinBot.angularVelocity then
+			movement.spinBot.angularVelocity:Destroy()
+			movement.spinBot.angularVelocity = nil
+		end
+		return
+	end
+
+	local character = localPlayer.Character
+	local humRoot = character:FindFirstChild("HumanoidRootPart", true)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+
+	if humRoot and humanoid then
+		humanoid.AutoRotate = false
+
+		-- Remove existing SpinBot if it exists
+		local existingSpinBot = humRoot:FindFirstChild("Spinbot")
+		if existingSpinBot then
+			existingSpinBot:Destroy()
+		end
+
+		-- Create RootAttachment if it doesn't exist
+		local rootAttachment = humRoot:FindFirstChild("RootAttachment")
+		if not rootAttachment then
+			rootAttachment = Instance.new("Attachment")
+			rootAttachment.Name = "RootAttachment"
+			rootAttachment.Parent = humRoot
+		end
+
+		-- Create AngularVelocity for spinning
+		movement.spinBot.angularVelocity = Instance.new("AngularVelocity")
+		movement.spinBot.angularVelocity.Attachment0 = rootAttachment
+		movement.spinBot.angularVelocity.MaxTorque = math.huge
+		movement.spinBot.angularVelocity.AngularVelocity = Vector3.new(0, movement.spinBot.speed, 0)
+		movement.spinBot.angularVelocity.Parent = humRoot
+		movement.spinBot.angularVelocity.Name = "Spinbot"
+	end
+end
+
+-- No Jump Cooldown function
+local function toggleNoJumpCooldown(enabled)
+	movement.noJumpCooldown = enabled
+	if enabled then
+		localPlayer.Character:WaitForChild("Humanoid").UseJumpPower = true
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "No Jump Cooldown ENABLED", Color3.fromRGB(100, 255, 100))
+	else
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "No Jump Cooldown DISABLED", Color3.fromRGB(255, 100, 100))
+	end
+end
+
+-- Anti-Slow function
+local function antiSlowToggle(enabled)
+	movement.antiSlow = enabled
+	if enabled then
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Anti-Slow ENABLED", Color3.fromRGB(100, 255, 100))
+
+		game:GetService('RunService'):BindToRenderStep("Anti-Slow", 0, function()
+			if localPlayer.Character then
+				local bodyEffects = localPlayer.Character:WaitForChild("BodyEffects", 10)
+				local movement = bodyEffects and bodyEffects:WaitForChild("Movement", 10)
+
+				if movement then
+					local noWalkSpeed = movement:FindFirstChild("NoWalkSpeed")
+					if noWalkSpeed then
+						noWalkSpeed:Destroy()
+					end
+
+					local reduceWalk = movement:FindFirstChild("ReduceWalk")
+					if reduceWalk then
+						reduceWalk:Destroy()
+					end
+
+					local noJumping = movement:FindFirstChild("NoJumping")
+					if noJumping then
+						noJumping:Destroy()
+					end
+				end
+
+				if bodyEffects and bodyEffects.Reload and bodyEffects.Reload.Value == true then
+					bodyEffects.Reload.Value = false
+				end
+			end
+		end)
+	else
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Anti-Slow DISABLED", Color3.fromRGB(255, 100, 100))
+		game:GetService('RunService'):UnbindFromRenderStep("Anti-Slow")
+	end
+end
+
+-- Force Reset function
+local function forceReset()
+	local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+	if humanoid then
+		humanoid.Health = 0
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Force Reset executed", Color3.fromRGB(255, 150, 100))
+	end
+end
+
+-- NoClip function
+local function toggleNoClip(enabled)
+	State.NoClip = enabled
+	if enabled then
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "NoClip ENABLED", Color3.fromRGB(100, 255, 100))
+	else
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "NoClip DISABLED", Color3.fromRGB(255, 100, 100))
+	end
+end
+
+-- Infinite Jump function
+local function toggleInfiniteJump(enabled)
+	State.InfiniteJump = enabled
+	if enabled then
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Infinite Jump ENABLED", Color3.fromRGB(100, 255, 100))
+	else
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Infinite Jump DISABLED", Color3.fromRGB(255, 100, 100))
+	end
+end
+
+-- Keybind handling for movement features
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		-- Speed keybind
+		if input.KeyCode == movement.speed.keybind then
+			movement.speed.enabled = not movement.speed.enabled
+			State.SpeedEnabled = movement.speed.enabled
+			CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Speed " .. (movement.speed.enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 100))
+		end
+
+		-- Fly keybind
+		if input.KeyCode == movement.fly.keybind then
+			movement.fly.enabled = not movement.fly.enabled
+			State.FlyEnabled = movement.fly.enabled
+			CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Fly " .. (movement.fly.enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 100))
+		end
+
+		-- Fly V2 keybind
+		if input.KeyCode == movement.flyV2.keybind then
+			if movement.flyV2.flying then
+				stopFlyingV2()
+				State.FlyV2Enabled = false
+				CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Fly V2 DISABLED", Color3.fromRGB(255, 100, 100))
+			else
+				startFlyingV2()
+				State.FlyV2Enabled = true
+				CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Fly V2 ENABLED", Color3.fromRGB(100, 255, 100))
+			end
+		end
+
+		-- Fly V2 movement keys
+		if input.KeyCode == Enum.KeyCode.W then
+			movement.flyV2.keys.w = true
+		elseif input.KeyCode == Enum.KeyCode.S then
+			movement.flyV2.keys.s = true
+		elseif input.KeyCode == Enum.KeyCode.A then
+			movement.flyV2.keys.a = true
+		elseif input.KeyCode == Enum.KeyCode.D then
+			movement.flyV2.keys.d = true
+		end
+
+		-- Force Reset keybind
+		if input.KeyCode == Enum.KeyCode.R then
+			forceReset()
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		-- Fly V2 movement keys
+		if input.KeyCode == Enum.KeyCode.W then
+			movement.flyV2.keys.w = false
+		elseif input.KeyCode == Enum.KeyCode.S then
+			movement.flyV2.keys.s = false
+		elseif input.KeyCode == Enum.KeyCode.A then
+			movement.flyV2.keys.a = false
+		elseif input.KeyCode == Enum.KeyCode.D then
+			movement.flyV2.keys.d = false
+		end
+	end
+end)
+
+-- RenderStepped connections for movement
+RunService.Heartbeat:Connect(function(deltaTime)
+	updateCframeSpeed(deltaTime)
+	updateFly(deltaTime)
+	updateFlyV2()
+	applySpinBot()
+end)
+
+-- Character respawn handling
+localPlayer.CharacterAdded:Connect(function(newCharacter)
+	-- Reset all movement states
+	movement.speed.enabled = false
+	movement.fly.enabled = false
+
+	if movement.flyV2.flying then
+		stopFlyingV2()
+	end
+
+	-- Reset UI states
+	State.SpeedEnabled = false
+	State.FlyEnabled = false
+	State.FlyV2Enabled = false
+
+	CreateTerminalMessage(GetCurrentTime(), "[SYSTEM]", "Character respawned - movement features reset", Color3.fromRGB(100, 200, 255))
+end)
+
+-- Continue with the existing NerdWareOS GUI code below...
+-- [The rest of your existing NerdWareOS GUI code remains the same, but I'll add the new movement features to the appropriate tabs]
+
+local success, playerGui = pcall(function()
+	return SafeWaitForChild(localPlayer, "PlayerGui", 5)
+end)
+if not success or not playerGui then
+	warn("Failed to access PlayerGui, retrying...")
+	playerGui = SafeWaitForChild(localPlayer, "PlayerGui", 10)
+end
+
+local existingGui = playerGui:FindFirstChild("NerdWareOS")
+if existingGui then
+	existingGui:Destroy()
+	task.wait(0.1)
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+local MainFrame = Instance.new("Frame")
+local TerminalFrame = Instance.new("ScrollingFrame")
+local SidePanel = Instance.new("Frame")
+
+ScreenGui.Parent = playerGui
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Name = "NerdWareOS"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+
+MainFrame.Parent = ScreenGui
+MainFrame.Name = "MainFrame"
+MainFrame.BackgroundColor3 = Color3.fromRGB(10, 12, 15)
+MainFrame.BorderSizePixel = 0
+MainFrame.Position = UDim2.new(0.5, -600, 0.5, -350)
+MainFrame.Size = UDim2.new(0, 1200, 0, 700)
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 8)
+mainCorner.Parent = MainFrame
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = themeColor
+mainStroke.Thickness = 2
+mainStroke.Transparency = 0.5
+mainStroke.Parent = MainFrame
+
+task.delay(0.5, function()
+	ProtectGUI(ScreenGui)
+end)
+
+MainFrame.Position = UDim2.new(0.5, -600, 0.5, -700)
+local entranceTween = TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+	Position = UDim2.new(0.5, -600, 0.5, -350)
+})
+entranceTween:Play()
+
+TerminalFrame.Parent = MainFrame
+TerminalFrame.BackgroundColor3 = Color3.fromRGB(10, 12, 15)
+TerminalFrame.BorderSizePixel = 0
+TerminalFrame.Position = UDim2.new(0, 10, 0, 10)
+TerminalFrame.Size = UDim2.new(0, 780, 0, 680)
+TerminalFrame.ScrollBarThickness = 6
+TerminalFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+TerminalFrame.ScrollBarImageColor3 = themeColor
+TerminalFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+local terminalCorner = Instance.new("UICorner")
+terminalCorner.CornerRadius = UDim.new(0, 6)
+terminalCorner.Parent = TerminalFrame
+
+local logo = Instance.new("TextLabel")
+logo.Parent = TerminalFrame
+logo.BackgroundTransparency = 1
+logo.Position = UDim2.new(0, 5, 0, 0)
+logo.Size = UDim2.new(1, -10, 0, 220)
+logo.Font = Enum.Font.Code
+logo.Text = [[>>NerdWareOS(WIP).v1.0
+
+░██╗░░░░░░░██╗███████╗██╗░░░░░░█████╗░░█████╗░███╗░░░███╗███████╗  ████████╗░█████╗░
+░██║░░██╗░░██║██╔════╝██║░░░░░██╔══██╗██╔══██╗████╗░████║██╔════╝  ╚══██╔══╝██╔══██╗
+░╚██╗████╗██╔╝█████╗░░██║░░░░░██║░░╚═╝██║░░██║██╔████╔██║█████╗░░  ░░░██║░░░██║░░██║
+░░████╔═████║░██╔══╝░░██║░░░░░██║░░██╗██║░░██║██║╚██╔╝██║██╔══╝░░  ░░░██║░░░██║░░██║
+░░╚██╔╝░╚██╔╝░███████╗███████╗╚█████╔╝╚█████╔╝██║░╚═╝░██║███████╗  ░░░██║░░░╚█████╔╝
+░░░╚═╝░░░╚═╝░░╚══════╝╚══════╝░╚════╝░░╚════╝░╚═╝░░░░░╚═╝╚══════╝  ░░░╚═╝░░░░╚════╝░
+
+███╗░░██║███████╗██████╗░██████╗░░██╗░░░░░░░██╗░█████╗░██████╗░███████╗  ░█████╗░░██████╗
+████╗░██║██╔════╝██╔══██╗██╔══██╗░██║░░██╗░░██║██╔══██╗██╔══██╗██╔════╝  ██╔══██╗██╔════╝
+██╔██╗██║█████╗░░██████╔╝██║░░██║░╚██╗████╗██╔╝███████║██████╔╝█████╗░░  ██║░░██║╚█████╗░
+██║╚████║██╔══╝░░██╔══██╗██║░░██║░░████╔═████║░██╔══██║██╔══██╗██╔══╝░░  ██║░░██║░╚═══██╗
+██║░╚███║███████╗██║░░██║██████╔╝░░╚██╔╝░╚██╔╝░██║░░██║██║░░██║███████╗  ╚█████╔╝██████╔╝
+╚═╝░░╚══╝╚══════╝╚═╝░░╚═╝╚═════╝░░░░╚═╝░░░╚═╝░░╚═╝░░╚═╝╚═╝░░╚═╝╚══════╝  ░╚════╝░╚═════╝░
+]]
+logo.TextColor3 = themeColor
+logo.TextSize = 12
+logo.TextXAlignment = Enum.TextXAlignment.Left
+logo.TextYAlignment = Enum.TextYAlignment.Top
+logo.TextWrapped = false
+logo.LayoutOrder = 1
+
+logo.TextTransparency = 1
+local logoTween = TweenService:Create(logo, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+	TextTransparency = 0
+})
+task.delay(0.3, function()
+	logoTween:Play()
+end)
+
+local welcomeText = Instance.new("TextLabel")
+welcomeText.Parent = TerminalFrame
+welcomeText.BackgroundTransparency = 1
+welcomeText.Position = UDim2.new(0, 5, 0, 220)
+welcomeText.Size = UDim2.new(1, -10, 0, 40)
+welcomeText.Font = Enum.Font.Code
+welcomeText.Text = "Welcome to NerdWareOS(WIP) - Works On Any Game You Run On For An Advantage :)"
+welcomeText.TextColor3 = themeColor
+welcomeText.TextSize = 11
+welcomeText.TextXAlignment = Enum.TextXAlignment.Left
+welcomeText.TextYAlignment = Enum.TextYAlignment.Top
+welcomeText.TextWrapped = true
+welcomeText.LayoutOrder = 2
+
+welcomeText.TextTransparency = 1
+local welcomeTween = TweenService:Create(welcomeText, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+	TextTransparency = 0
+})
+task.delay(0.5, function()
+	welcomeTween:Play()
+end)
+
+local messagesLayout = Instance.new("UIListLayout")
+messagesLayout.Parent = TerminalFrame
+messagesLayout.Padding = UDim.new(0, 3)
+messagesLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local messagesPadding = Instance.new("UIPadding")
+messagesPadding.Parent = TerminalFrame
+messagesPadding.PaddingTop = UDim.new(0, 270)
+messagesPadding.PaddingLeft = UDim.new(0, 5)
+messagesPadding.PaddingRight = UDim.new(0, 15)
+
+function CreateTerminalMessage(timestamp, level, message, color)
+	RandomizeExecution()
+	TrackExecution()
+
+	if not TerminalFrame then return end
+	local msgFrame = Instance.new("Frame")
+	msgFrame.Parent = TerminalFrame
+	msgFrame.BackgroundTransparency = 1
+	msgFrame.Size = UDim2.new(1, -10, 0, 15)
+	msgFrame.LayoutOrder = tick()
+
+	local msgLabel = Instance.new("TextLabel")
+	msgLabel.Parent = msgFrame
+	msgLabel.BackgroundTransparency = 1
+	msgLabel.Size = UDim2.new(1, 0, 1, 0)
+	msgLabel.Font = Enum.Font.Code
+	msgLabel.Text = "[" .. timestamp .. "] " .. level .. " " .. message
+	msgLabel.TextColor3 = color
+	msgLabel.TextSize = 11
+	msgLabel.TextXAlignment = Enum.TextXAlignment.Left
+	msgLabel.TextWrapped = true
+
+	msgLabel.TextTransparency = 1
+	msgLabel.Position = UDim2.new(0, -20, 0, 0)
+	local msgTween = TweenService:Create(msgLabel, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		TextTransparency = 0,
+		Position = UDim2.new(0, 0, 0, 0)
+	})
+	msgTween:Play()
+
+	if level == "[CMD]" then
+		table.insert(State.CommandHistory, {
+			time = timestamp,
+			command = message
+		})
+		if #State.CommandHistory > 50 then
+			table.remove(State.CommandHistory, 1)
+		end
+		State.CommandsUsed = (State.CommandsUsed or 0) + 1
+	end
+
+	return msgFrame
+end
+
+function CreateMultiLineTerminalMessage(timestamp, level, messages, color)
+	RandomizeExecution()
+
+	if not TerminalFrame then return end
+	for i, message in ipairs(messages) do
+		local msgFrame = Instance.new("Frame")
+		msgFrame.Parent = TerminalFrame
+		msgFrame.BackgroundTransparency = 1
+		msgFrame.Size = UDim2.new(1, -10, 0, 15)
+		msgFrame.LayoutOrder = tick() + i
+
+		local msgLabel = Instance.new("TextLabel")
+		msgLabel.Parent = msgFrame
+		msgLabel.BackgroundTransparency = 1
+		msgLabel.Size = UDim2.new(1, 0, 1, 0)
+		msgLabel.Font = Enum.Font.Code
+
+		if i == 1 then
+			msgLabel.Text = "[" .. timestamp .. "] " .. level .. " " .. message
+		else
+			msgLabel.Text = message
+		end
+
+		msgLabel.TextColor3 = color
+		msgLabel.TextSize = 11
+		msgLabel.TextXAlignment = Enum.TextXAlignment.Left
+		msgLabel.TextWrapped = true
+
+		msgLabel.TextTransparency = 1
+		msgLabel.Position = UDim2.new(0, -20, 0, 0)
+		local msgTween = TweenService:Create(msgLabel, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			TextTransparency = 0,
+			Position = UDim2.new(0, 0, 0, 0)
+		})
+		task.delay((i-1) * 0.05, function()
+			msgTween:Play()
+		end)
+	end
+end
+
+function ShowNotification(title, message, duration)
+	if not State.Notifications then return end
+	RandomizeExecution()
+
+	local notif = Instance.new("Frame")
+	notif.Parent = ScreenGui
+	notif.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+	notif.BorderSizePixel = 0
+	notif.Position = UDim2.new(1, 320, 0, 20)
+	notif.Size = UDim2.new(0, 320, 0, 100)
+	notif.ClipsDescendants = true
+	notif.ZIndex = 1000
+
+	-- Add gradient background
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 30, 45)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 20, 30))
+	})
+	gradient.Rotation = 90
+	gradient.Parent = notif
+
+	-- Rounded corners
+	local notifCorner = Instance.new("UICorner")
+	notifCorner.CornerRadius = UDim.new(0, 10)
+	notifCorner.Parent = notif
+
+	-- Shadow effect
+	local shadow = Instance.new("ImageLabel")
+	shadow.Parent = notif
+	shadow.BackgroundTransparency = 1
+	shadow.Size = UDim2.new(1, 10, 1, 10)
+	shadow.Position = UDim2.new(0, -5, 0, 5)
+	shadow.Image = "rbxassetid://5028857472" -- Smooth shadow image
+	shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+	shadow.ImageTransparency = 0.7
+	shadow.ScaleType = Enum.ScaleType.Slice
+	shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+	shadow.ZIndex = 999
+
+	-- Title
+	local notifTitle = Instance.new("TextLabel")
+	notifTitle.Parent = notif
+	notifTitle.BackgroundTransparency = 1
+	notifTitle.Position = UDim2.new(0, 15, 0, 10)
+	notifTitle.Size = UDim2.new(1, -30, 0, 25)
+	notifTitle.Font = Enum.Font.GothamBold
+	notifTitle.Text = title
+	notifTitle.TextColor3 = themeColor
+	notifTitle.TextSize = 16
+	notifTitle.TextXAlignment = Enum.TextXAlignment.Left
+	notifTitle.TextTransparency = 1
+
+	-- Message
+	local notifMessage = Instance.new("TextLabel")
+	notifMessage.Parent = notif
+	notifMessage.BackgroundTransparency = 1
+	notifMessage.Position = UDim2.new(0, 15, 0, 40)
+	notifMessage.Size = UDim2.new(1, -30, 1, -50)
+	notifMessage.Font = Enum.Font.Gotham
+	notifMessage.Text = message
+	notifMessage.TextColor3 = Color3.fromRGB(200, 200, 200)
+	notifMessage.TextSize = 12
+	notifMessage.TextXAlignment = Enum.TextXAlignment.Left
+	notifMessage.TextYAlignment = Enum.TextYAlignment.Top
+	notifMessage.TextWrapped = true
+	notifMessage.TextTransparency = 1
+
+	-- Close button
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Parent = notif
+	closeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+	closeBtn.BorderSizePixel = 0
+	closeBtn.Position = UDim2.new(1, -35, 0, 10)
+	closeBtn.Size = UDim2.new(0, 25, 0, 25)
+	closeBtn.Font = Enum.Font.Gotham
+	closeBtn.Text = "X"
+	closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeBtn.TextSize = 14
+	closeBtn.AutoButtonColor = false
+	closeBtn.ZIndex = 1001
+
+	local closeBtnCorner = Instance.new("UICorner")
+	closeBtnCorner.CornerRadius = UDim.new(0, 5)
+	closeBtnCorner.Parent = closeBtn
+
+	-- Animation: Slide in and fade
+	local slideIn = TweenService:Create(notif, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Position = UDim2.new(1, -340, 0, 20)
+	})
+	local fadeIn = TweenService:Create(notifTitle, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {TextTransparency = 0})
+	local fadeInMsg = TweenService:Create(notifMessage, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {TextTransparency = 0})
+
+	slideIn:Play()
+	task.delay(0.2, function()
+		fadeIn:Play()
+		fadeInMsg:Play()
+	end)
+
+	-- Hover effect for close button
+	closeBtn.MouseEnter:Connect(function()
+		TweenService:Create(closeBtn, TweenInfo.new(0.2), {
+			BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+		}):Play()
+	end)
+	closeBtn.MouseLeave:Connect(function()
+		TweenService:Create(closeBtn, TweenInfo.new(0.2), {
+			BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+		}):Play()
+	end)
+	closeBtn.MouseButton1Click:Connect(function()
+		local fadeOut = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+			Position = UDim2.new(1, 20, 0, 20),
+			BackgroundTransparency = 1
+		})
+		fadeOut:Play()
+		fadeOut.Completed:Connect(function()
+			notif:Destroy()
+		end)
+	end)
+
+	-- Auto-close with fade-out
+	task.delay(duration or 5, function()
+		local fadeOut = TweenService:Create(notifTitle, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {TextTransparency = 1})
+		local fadeOutMsg = TweenService:Create(notifMessage, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {TextTransparency = 1})
+		local slideOut = TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+			Position = UDim2.new(1, 20, 0, 20),
+			BackgroundTransparency = 1
+		})
+
+		fadeOut:Play()
+		fadeOutMsg:Play()
+		task.delay(0.1, function()
+			slideOut:Play()
+		end)
+		slideOut.Completed:Connect(function()
+			notif:Destroy()
+		end)
+	end)
+end
+
+local startupMessages = {
+	{time = 0, level = "[SYSTEM]", msg = "Initializing (WIP) v1.0...", color = Color3.fromRGB(80, 200, 100)},
+	{time = 0.1, level = "[SYSTEM]", msg = "Loading core modules and dependencies...", color = Color3.fromRGB(80, 200, 100)},
+	{time = 0.2, level = "[PROTECTION]", msg = "GUI protection system activated", color = Color3.fromRGB(255, 200, 100)},
+	{time = 0.3, level = "[ANTI-AFK]", msg = "AFK prevention system enabled", color = Color3.fromRGB(100, 200, 255)},
+	{time = 0.4, level = "[SYSTEM]", msg = "Establishing secure connection to server...", color = Color3.fromRGB(80, 200, 100)},
+	{time = 0.5, level = "[SUCCESS]", msg = "All systems operational. Welcome " .. localPlayer.Name .. "!", color = Color3.fromRGB(100, 255, 100)},
+	{time = 0.6, level = "[TIP]", msg = "Commands support partial names: '/tp joh' finds 'JohnDoe123'.", color = Color3.fromRGB(100, 180, 255)},
+	{time = 0.7, level = "[NOTICE]", msg = "Tab system includes Combat, Visuals, Movement, World, and Settings.", color = Color3.fromRGB(80, 200, 100)},
+	{time = 0.8, level = "[NOTICE]", msg = "To stop spectating or actions, use /view or /bang commands.", color = Color3.fromRGB(80, 200, 100)},
+	{time = 0.9, level = "[INFO]", msg = "Features: Camlock, ESP, Fly, Noclip, and more!", color = Color3.fromRGB(100, 180, 255)},
+	{time = 1.0, level = "[HUMOR]", msg = "Remember: With great power comes great responsibility... or chaos.", color = Color3.fromRGB(150, 150, 255)},
+	{time = 1.1, level = "[HUMOR]", msg = "If it breaks, just blame the update. Works every time.", color = Color3.fromRGB(150, 150, 255)},
+}
+
+for _, msg in ipairs(startupMessages) do
+	task.delay(msg.time, function()
+		CreateTerminalMessage(GetCurrentTime(), msg.level, msg.msg, msg.color)
+	end)
+end
+
+task.delay(1, function()
+	LoadFromCloud()
+end)
+
+SidePanel.Parent = MainFrame
+SidePanel.BackgroundColor3 = Color3.fromRGB(10, 12, 15)
+SidePanel.BorderSizePixel = 0
+SidePanel.Position = UDim2.new(0, 800, 0, 10)
+SidePanel.Size = UDim2.new(0, 390, 0, 680)
+
+SidePanel.Position = UDim2.new(0, 1200, 0, 10)
+local sidePanelTween = TweenService:Create(SidePanel, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, 0.2), {
+	Position = UDim2.new(0, 800, 0, 10)
+})
+sidePanelTween:Play()
+
+local statusBox = Instance.new("Frame")
+statusBox.Parent = SidePanel
+statusBox.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+statusBox.BorderColor3 = themeColor
+statusBox.BorderSizePixel = 2
+statusBox.Position = UDim2.new(0, 5, 0, 5)
+statusBox.Size = UDim2.new(1, -10, 0, 140)
+
+local statusCorner = Instance.new("UICorner")
+statusCorner.CornerRadius = UDim.new(0, 6)
+statusCorner.Parent = statusBox
+
+local statusTitle = Instance.new("TextLabel")
+statusTitle.Parent = statusBox
+statusTitle.BackgroundTransparency = 1
+statusTitle.Position = UDim2.new(0, 10, 0, 8)
+statusTitle.Size = UDim2.new(1, -20, 0, 20)
+statusTitle.Font = Enum.Font.Code
+statusTitle.Text = "⚡ SERVER STATUS"
+statusTitle.TextColor3 = themeColor
+statusTitle.TextSize = 14
+statusTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local statusInfo = Instance.new("TextLabel")
+statusInfo.Parent = statusBox
+statusInfo.BackgroundTransparency = 1
+statusInfo.Position = UDim2.new(0, 10, 0, 35)
+statusInfo.Size = UDim2.new(1, -20, 1, -45)
+statusInfo.Font = Enum.Font.Code
+statusInfo.Text = "Players: 0/0\nTime: 00:00:00\nFPS: 60\nUptime: 0s\nPing: 0ms\nMemory: 0 MB"
+statusInfo.TextColor3 = Color3.fromRGB(200, 200, 200)
+statusInfo.TextSize = 11
+statusInfo.TextXAlignment = Enum.TextXAlignment.Left
+statusInfo.TextYAlignment = Enum.TextYAlignment.Top
+
+statusBox.Position = UDim2.new(0, 5, 0, -140)
+local statusBoxTween = TweenService:Create(statusBox, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out, 0, false, 0.5), {
+	Position = UDim2.new(0, 5, 0, 5)
+})
+statusBoxTween:Play()
+
+task.spawn(function()
+	local lastFPSUpdate = tick()
+	local frameCount = 0
+	local currentFPS = 60
+
+	local fpsConnection = RunService.Heartbeat:Connect(function()
+		frameCount = frameCount + 1
+		if tick() - lastFPSUpdate >= 1 then
+			currentFPS = frameCount
+			frameCount = 0
+			lastFPSUpdate = tick()
+		end
+	end)
+
+	while task.wait(0.5) do
+		SafeCall(function()
+			PreventAFK()
+
+			local players = Players:GetPlayers()
+			local playerCount = #players
+			local maxPlayers = Players.MaxPlayers
+			local currentTime = os.date("%H:%M:%S")
+			local fps = currentFPS
+			local uptime = math.floor(tick() - State.StartTime)
+			local hours = math.floor(uptime / 3600)
+			local minutes = math.floor((uptime % 3600) / 60)
+			local seconds = uptime % 60
+			local uptimeStr = string.format("%02d:%02d:%02d", hours, minutes, seconds)
+			local ping = 0
+			SafeCall(function()
+				ping = math.floor(localPlayer:GetNetworkPing() * 1000)
+			end)
+
+			local memory = 0
+			SafeCall(function()
+				memory = math.floor(game:GetService("Stats"):GetTotalMemoryUsageMb())
+			end)
+
+			statusInfo.Text = string.format(
+				"Players Online: %d/%d\nServer Time: %s\nFPS: %d | Memory: %d MB\nScript Uptime: %s\nNetwork Ping: %dms\nPlace ID: %s",
+				playerCount, maxPlayers, currentTime, fps, memory, uptimeStr, ping, tostring(game.PlaceId)
+			)
+
+			if frameCount == 0 and (currentFPS < 30 or currentFPS > 100) then
+				local pulse = TweenService:Create(statusInfo, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+					TextColor3 = currentFPS < 30 and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(100, 255, 100)
+				})
+				pulse:Play()
+				pulse.Completed:Connect(function()
+					local reset = TweenService:Create(statusInfo, TweenInfo.new(0.5), {
+						TextColor3 = Color3.fromRGB(200, 200, 200)
+					})
+					reset:Play()
+				end)
+			end
+		end)
+	end
+end)
+
+local settingsPanel = Instance.new("Frame")
+settingsPanel.Parent = MainFrame
+settingsPanel.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+settingsPanel.BorderColor3 = themeColor
+settingsPanel.BorderSizePixel = 2
+settingsPanel.Position = UDim2.new(0, 800, 0, 10)
+settingsPanel.Size = UDim2.new(0, 390, 0, 680)
+settingsPanel.Visible = false
+
+local settingsCorner = Instance.new("UICorner")
+settingsCorner.CornerRadius = UDim.new(0, 6)
+settingsCorner.Parent = settingsPanel
+
+local settingsPanelTitle = Instance.new("TextLabel")
+settingsPanelTitle.Parent = settingsPanel
+settingsPanelTitle.BackgroundTransparency = 1
+settingsPanelTitle.Position = UDim2.new(0, 10, 0, 8)
+settingsPanelTitle.Size = UDim2.new(1, -40, 0, 25)
+settingsPanelTitle.Font = Enum.Font.Code
+settingsPanelTitle.Text = "⚙ SETTINGS"
+settingsPanelTitle.TextColor3 = themeColor
+settingsPanelTitle.TextSize = 14
+settingsPanelTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local closeSettingsBtn = Instance.new("TextButton")
+closeSettingsBtn.Parent = settingsPanel
+closeSettingsBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+closeSettingsBtn.BorderSizePixel = 0
+closeSettingsBtn.Position = UDim2.new(1, -30, 0, 5)
+closeSettingsBtn.Size = UDim2.new(0, 25, 0, 25)
+closeSettingsBtn.Font = Enum.Font.Code
+closeSettingsBtn.Text = "X"
+closeSettingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeSettingsBtn.TextSize = 14
+
+local closeBtnCorner = Instance.new("UICorner")
+closeBtnCorner.CornerRadius = UDim.new(0, 4)
+closeBtnCorner.Parent = closeSettingsBtn
+
+closeSettingsBtn.MouseEnter:Connect(function()
+	TweenService:Create(closeSettingsBtn, TweenInfo.new(0.2), {
+		BackgroundColor3 = Color3.fromRGB(220, 70, 70),
+		Size = UDim2.new(0, 28, 0, 28)
+	}):Play()
+end)
+
+closeSettingsBtn.MouseLeave:Connect(function()
+	TweenService:Create(closeSettingsBtn, TweenInfo.new(0.2), {
+		BackgroundColor3 = Color3.fromRGB(180, 50, 50),
+		Size = UDim2.new(0, 25, 0, 25)
+	}):Play()
+end)
+
+closeSettingsBtn.MouseButton1Click:Connect(function()
+	settingsPanel.Visible = false
+end)
+
+local settingsContent = Instance.new("ScrollingFrame")
+settingsContent.Parent = settingsPanel
+settingsContent.BackgroundColor3 = Color3.fromRGB(10, 12, 15)
+settingsContent.BorderColor3 = themeColor:Lerp(Color3.fromRGB(40, 90, 140), 0.5)
+settingsContent.BorderSizePixel = 1
+settingsContent.Position = UDim2.new(0, 10, 0, 40)
+settingsContent.Size = UDim2.new(1, -20, 1, -50)
+settingsContent.ScrollBarThickness = 6
+settingsContent.ScrollBarImageColor3 = themeColor
+settingsContent.CanvasSize = UDim2.new(0, 0, 0, 0)
+settingsContent.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+local settingsContentCorner = Instance.new("UICorner")
+settingsContentCorner.CornerRadius = UDim.new(0, 4)
+settingsContentCorner.Parent = settingsContent
+
+local settingsLayout = Instance.new("UIListLayout")
+settingsLayout.Parent = settingsContent
+settingsLayout.Padding = UDim.new(0, 8)
+settingsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local settingsPadding = Instance.new("UIPadding")
+settingsPadding.Parent = settingsContent
+settingsPadding.PaddingTop = UDim.new(0, 5)
+settingsPadding.PaddingLeft = UDim.new(0, 5)
+settingsPadding.PaddingRight = UDim.new(0, 5)
+settingsPadding.PaddingBottom = UDim.new(0, 5)
+
+local function ClearSettingsPanel()
+	for _, child in ipairs(settingsContent:GetChildren()) do
+		if child:IsA("Frame") or child:IsA("TextLabel") then
+			child:Destroy()
+		end
+	end
+end
+
+local function CreateSettingsSlider(labelText, minValue, maxValue, defaultValue, callback)
+	local sliderFrame = Instance.new("Frame")
+	sliderFrame.Parent = settingsContent
+	sliderFrame.BackgroundTransparency = 1
+	sliderFrame.Size = UDim2.new(1, -10, 0, 60)
+	sliderFrame.LayoutOrder = tick()
+
+	local label = Instance.new("TextLabel")
+	label.Parent = sliderFrame
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.new(0, 0, 0, 0)
+	label.Size = UDim2.new(1, -60, 0, 20)
+	label.Font = Enum.Font.Code
+	label.Text = labelText
+	label.TextColor3 = Color3.fromRGB(200, 200, 200)
+	label.TextSize = 12
+	label.TextXAlignment = Enum.TextXAlignment.Left
+
+	local sliderBg = Instance.new("Frame")
+	sliderBg.Parent = sliderFrame
+	sliderBg.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+	sliderBg.BorderColor3 = themeColor
+	sliderBg.BorderSizePixel = 1
+	sliderBg.Position = UDim2.new(0, 0, 0, 30)
+	sliderBg.Size = UDim2.new(1, -10, 0, 20)
+
+	local sliderBgCorner = Instance.new("UICorner")
+	sliderBgCorner.CornerRadius = UDim.new(0, 4)
+	sliderBgCorner.Parent = sliderBg
+
+	local sliderFill = Instance.new("Frame")
+	sliderFill.Parent = sliderBg
+	sliderFill.BackgroundColor3 = themeColor
+	sliderFill.BorderSizePixel = 0
+	sliderFill.Size = UDim2.new((defaultValue - minValue) / (maxValue - minValue), 0, 1, 0)
+
+	local sliderFillCorner = Instance.new("UICorner")
+	sliderFillCorner.CornerRadius = UDim.new(0, 4)
+	sliderFillCorner.Parent = sliderFill
+
+	local sliderBtn = Instance.new("TextButton")
+	sliderBtn.Parent = sliderBg
+	sliderBtn.BackgroundColor3 = themeColor:Lerp(Color3.fromRGB(255, 255, 255), 0.2)
+	sliderBtn.BorderSizePixel = 0
+	sliderBtn.Size = UDim2.new(0, 18, 0, 18)
+	sliderBtn.Position = UDim2.new((defaultValue - minValue) / (maxValue - minValue), -9, 0.5, -9)
+	sliderBtn.Text = ""
+
+	local sliderBtnCorner = Instance.new("UICorner")
+	sliderBtnCorner.CornerRadius = UDim.new(1, 0)
+	sliderBtnCorner.Parent = sliderBtn
+
+	local valueLabel = Instance.new("TextLabel")
+	valueLabel.Parent = sliderFrame
+	valueLabel.BackgroundTransparency = 1
+	valueLabel.Position = UDim2.new(1, -55, 0, 0)
+	valueLabel.Size = UDim2.new(0, 55, 0, 20)
+	valueLabel.Font = Enum.Font.Code
+	valueLabel.Text = tostring(defaultValue)
+	valueLabel.TextColor3 = themeColor
+	valueLabel.TextSize = 12
+	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+	local dragging = false
+
+	sliderBtn.MouseButton1Down:Connect(function()
+		dragging = true
+		TweenService:Create(sliderBtn, TweenInfo.new(0.1), {
+			Size = UDim2.new(0, 22, 0, 22)
+		}):Play()
+	end)
+
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+			TweenService:Create(sliderBtn, TweenInfo.new(0.1), {
+				Size = UDim2.new(0, 18, 0, 18)
+			}):Play()
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local mousePos = input.Position.X
+			local sliderPos = sliderBg.AbsolutePosition.X
+			local sliderWidth = sliderBg.AbsoluteSize.X
+			local relativePos = math.clamp((mousePos - sliderPos) / sliderWidth, 0, 1)
+			local value = minValue + (maxValue - minValue) * relativePos
+
+			if maxValue - minValue > 10 then
+				value = math.round(value)
+			else
+				value = math.round(value * 100) / 100
+			end
+
+			sliderBtn.Position = UDim2.new(relativePos, -9, 0.5, -9)
+			sliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
+			valueLabel.Text = tostring(value)
+
+			if callback then
+				SafeCall(callback, value)
+			end
+		end
+	end)
+
+	return sliderFrame
+end
+
+local function CreateSettingsToggle(labelText, defaultValue, callback)
+	local toggleFrame = Instance.new("Frame")
+	toggleFrame.Parent = settingsContent
+	toggleFrame.BackgroundTransparency = 1
+	toggleFrame.Size = UDim2.new(1, -10, 0, 35)
+	toggleFrame.LayoutOrder = tick()
+
+	local label = Instance.new("TextLabel")
+	label.Parent = toggleFrame
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.new(0, 0, 0, 0)
+	label.Size = UDim2.new(1, -60, 1, 0)
+	label.Font = Enum.Font.Code
+	label.Text = labelText
+	label.TextColor3 = Color3.fromRGB(200, 200, 200)
+	label.TextSize = 12
+	label.TextXAlignment = Enum.TextXAlignment.Left
+
+	local toggleBtn = Instance.new("TextButton")
+	toggleBtn.Parent = toggleFrame
+	toggleBtn.BackgroundColor3 = defaultValue and themeColor or Color3.fromRGB(60, 60, 60)
+	toggleBtn.BorderSizePixel = 0
+	toggleBtn.Position = UDim2.new(1, -50, 0.5, -12)
+	toggleBtn.Size = UDim2.new(0, 50, 0, 24)
+	toggleBtn.Text = ""
+	toggleBtn.AutoButtonColor = false
+
+	local toggleBtnCorner = Instance.new("UICorner")
+	toggleBtnCorner.CornerRadius = UDim.new(1, 0)
+	toggleBtnCorner.Parent = toggleBtn
+
+	local toggleIndicator = Instance.new("Frame")
+	toggleIndicator.Parent = toggleBtn
+	toggleIndicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	toggleIndicator.BorderSizePixel = 0
+	toggleIndicator.Position = defaultValue and UDim2.new(1, -22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
+	toggleIndicator.Size = UDim2.new(0, 20, 0, 20)
+
+	local indicatorCorner = Instance.new("UICorner")
+	indicatorCorner.CornerRadius = UDim.new(1, 0)
+	indicatorCorner.Parent = toggleIndicator
+
+	local isToggled = defaultValue
+
+	toggleBtn.MouseButton1Click:Connect(function()
+		isToggled = not isToggled
+
+		local newBgColor = isToggled and themeColor or Color3.fromRGB(60, 60, 60)
+		local newPos = isToggled and UDim2.new(1, -22, 0.5, -10) or UDim2.new(0, 2, 0.5, -10)
+
+		TweenService:Create(toggleBtn, TweenInfo.new(0.2), {BackgroundColor3 = newBgColor}):Play()
+		TweenService:Create(toggleIndicator, TweenInfo.new(0.2), {Position = newPos}):Play()
+
+		if callback then
+			SafeCall(callback, isToggled)
+		end
+	end)
+
+	return toggleFrame
+end
+
+local function CreateSettingsDropdown(labelText, options, defaultOption, callback)
+	local dropdownFrame = Instance.new("Frame")
+	dropdownFrame.Parent = settingsContent
+	dropdownFrame.BackgroundTransparency = 1
+	dropdownFrame.Size = UDim2.new(1, -10, 0, 60)
+	dropdownFrame.LayoutOrder = tick()
+	dropdownFrame.ZIndex = 100
+
+	local label = Instance.new("TextLabel")
+	label.Parent = dropdownFrame
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.new(0, 0, 0, 0)
+	label.Size = UDim2.new(1, -10, 0, 20)
+	label.Font = Enum.Font.Code
+	label.Text = labelText
+	label.TextColor3 = Color3.fromRGB(200, 200, 200)
+	label.TextSize = 12
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.ZIndex = 100
+
+	local dropdownBtn = Instance.new("TextButton")
+	dropdownBtn.Parent = dropdownFrame
+	dropdownBtn.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+	dropdownBtn.BorderColor3 = themeColor
+	dropdownBtn.BorderSizePixel = 1
+	dropdownBtn.Position = UDim2.new(0, 0, 0, 30)
+	dropdownBtn.Size = UDim2.new(1, -10, 0, 30)
+	dropdownBtn.Font = Enum.Font.Code
+	dropdownBtn.Text = defaultOption .. " ▼"
+	dropdownBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+	dropdownBtn.TextSize = 11
+	dropdownBtn.AutoButtonColor = false
+	dropdownBtn.ZIndex = 100
+
+	local dropdownBtnCorner = Instance.new("UICorner")
+	dropdownBtnCorner.CornerRadius = UDim.new(0, 4)
+	dropdownBtnCorner.Parent = dropdownBtn
+
+	local dropdownMenu = Instance.new("Frame")
+	dropdownMenu.Parent = ScreenGui
+	dropdownMenu.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+	dropdownMenu.BorderColor3 = themeColor
+	dropdownMenu.BorderSizePixel = 1
+	dropdownMenu.Size = UDim2.new(0, dropdownBtn.AbsoluteSize.X, 0, #options * 30)
+	dropdownMenu.Visible = false
+	dropdownMenu.ZIndex = 200
+
+	local dropdownMenuCorner = Instance.new("UICorner")
+	dropdownMenuCorner.CornerRadius = UDim.new(0, 4)
+	dropdownMenuCorner.Parent = dropdownMenu
+
+	local menuLayout = Instance.new("UIListLayout")
+	menuLayout.Parent = dropdownMenu
+	menuLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	for i, option in ipairs(options) do
+		local optionBtn = Instance.new("TextButton")
+		optionBtn.Parent = dropdownMenu
+		optionBtn.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+		optionBtn.BorderSizePixel = 0
+		optionBtn.Size = UDim2.new(1, 0, 0, 30)
+		optionBtn.Font = Enum.Font.Code
+		optionBtn.Text = option
+		optionBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+		optionBtn.TextSize = 11
+		optionBtn.LayoutOrder = i
+		optionBtn.AutoButtonColor = false
+		optionBtn.ZIndex = 200
+
+		optionBtn.MouseEnter:Connect(function()
+			TweenService:Create(optionBtn, TweenInfo.new(0.2), {
+				BackgroundColor3 = Color3.fromRGB(35, 45, 55)
+			}):Play()
+		end)
+
+		optionBtn.MouseLeave:Connect(function()
+			TweenService:Create(optionBtn, TweenInfo.new(0.2), {
+				BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+			}):Play()
+		end)
+
+		optionBtn.MouseButton1Click:Connect(function()
+			dropdownBtn.Text = option .. " ▼"
+			dropdownMenu.Visible = false
+			if callback then
+				SafeCall(callback, option)
+			end
+			CreateTerminalMessage(GetCurrentTime(), "[SETTINGS]", "Selected " .. option, Color3.fromRGB(150, 150, 255))
+		end)
+	end
+
+	dropdownBtn.MouseButton1Click:Connect(function()
+		dropdownMenu.Visible = not dropdownMenu.Visible
+		if dropdownMenu.Visible then
+			local btnPos = dropdownBtn.AbsolutePosition
+			dropdownMenu.Position = UDim2.new(0, btnPos.X, 0, btnPos.Y + dropdownBtn.AbsoluteSize.Y + 2)
+
+			dropdownMenu.Size = UDim2.new(0, dropdownBtn.AbsoluteSize.X, 0, 0)
+			local expandTween = TweenService:Create(dropdownMenu, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+				Size = UDim2.new(0, dropdownBtn.AbsoluteSize.X, 0, #options * 30)
+			})
+			expandTween:Play()
+		end
+	end)
+
+	return dropdownFrame
+end
+
+local function CreateColorPicker(labelText, defaultColor, callback)
+	local colorFrame = Instance.new("Frame")
+	colorFrame.Parent = settingsContent
+	colorFrame.BackgroundTransparency = 1
+	colorFrame.Size = UDim2.new(1, -10, 0, 60)
+	colorFrame.LayoutOrder = tick()
+
+	local label = Instance.new("TextLabel")
+	label.Parent = colorFrame
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.new(0, 0, 0, 0)
+	label.Size = UDim2.new(1, -60, 0, 20)
+	label.Font = Enum.Font.Code
+	label.Text = labelText
+	label.TextColor3 = Color3.fromRGB(200, 200, 200)
+	label.TextSize = 12
+	label.TextXAlignment = Enum.TextXAlignment.Left
+
+	local colorPreview = Instance.new("Frame")
+	colorPreview.Parent = colorFrame
+	colorPreview.BackgroundColor3 = defaultColor
+	colorPreview.BorderSizePixel = 1
+	colorPreview.BorderColor3 = themeColor
+	colorPreview.Position = UDim2.new(0, 0, 0, 30)
+	colorPreview.Size = UDim2.new(0, 60, 0, 30)
+
+	local colorPreviewCorner = Instance.new("UICorner")
+	colorPreviewCorner.CornerRadius = UDim.new(0, 4)
+	colorPreviewCorner.Parent = colorPreview
+
+	local colorBtn = Instance.new("TextButton")
+	colorBtn.Parent = colorFrame
+	colorBtn.BackgroundTransparency = 1
+	colorBtn.BorderSizePixel = 0
+	colorBtn.Position = UDim2.new(0, 0, 0, 30)
+	colorBtn.Size = UDim2.new(0, 60, 0, 30)
+	colorBtn.Font = Enum.Font.Code
+	colorBtn.Text = ""
+	colorBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+	colorBtn.TextSize = 11
+	colorBtn.AutoButtonColor = false
+
+	local colorValueLabel = Instance.new("TextLabel")
+	colorValueLabel.Parent = colorFrame
+	colorValueLabel.BackgroundTransparency = 1
+	colorValueLabel.Position = UDim2.new(0, 70, 0, 35)
+	colorValueLabel.Size = UDim2.new(1, -70, 0, 20)
+	colorValueLabel.Font = Enum.Font.Code
+	colorValueLabel.Text = string.format("R:%d G:%d B:%d", 
+		math.floor(defaultColor.R * 255), 
+		math.floor(defaultColor.G * 255), 
+		math.floor(defaultColor.B * 255))
+	colorValueLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	colorValueLabel.TextSize = 11
+	colorValueLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	local colorPickerMenu = Instance.new("Frame")
+	colorPickerMenu.Parent = ScreenGui
+	colorPickerMenu.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+	colorPickerMenu.BorderColor3 = themeColor
+	colorPickerMenu.BorderSizePixel = 1
+	colorPickerMenu.Size = UDim2.new(0, 250, 0, 300)
+	colorPickerMenu.Visible = false
+	colorPickerMenu.ZIndex = 200
+
+	local colorPickerCorner = Instance.new("UICorner")
+	colorPickerCorner.CornerRadius = UDim.new(0, 4)
+	colorPickerCorner.Parent = colorPickerMenu
+
+	-- Title
+	local pickerTitle = Instance.new("TextLabel")
+	pickerTitle.Parent = colorPickerMenu
+	pickerTitle.BackgroundTransparency = 1
+	pickerTitle.Position = UDim2.new(0, 10, 0, 10)
+	pickerTitle.Size = UDim2.new(1, -20, 0, 20)
+	pickerTitle.Font = Enum.Font.Code
+	pickerTitle.Text = "Color Picker"
+	pickerTitle.TextColor3 = themeColor
+	pickerTitle.TextSize = 12
+	pickerTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+	-- RGB Sliders
+	local rSlider = CreateSettingsSlider("Red", 0, 255, math.floor(defaultColor.R * 255), function(value)
+		local newColor = Color3.new(value/255, defaultColor.G, defaultColor.B)
+		colorPreview.BackgroundColor3 = newColor
+		colorValueLabel.Text = string.format("R:%d G:%d B:%d", 
+			math.floor(newColor.R * 255), 
+			math.floor(newColor.G * 255), 
+			math.floor(newColor.B * 255))
+		if callback then
+			SafeCall(callback, newColor)
+		end
+	end)
+	rSlider.Parent = colorPickerMenu
+	rSlider.Position = UDim2.new(0, 10, 0, 40)
+
+	local gSlider = CreateSettingsSlider("Green", 0, 255, math.floor(defaultColor.G * 255), function(value)
+		local newColor = Color3.new(defaultColor.R, value/255, defaultColor.B)
+		colorPreview.BackgroundColor3 = newColor
+		colorValueLabel.Text = string.format("R:%d G:%d B:%d", 
+			math.floor(newColor.R * 255), 
+			math.floor(newColor.G * 255), 
+			math.floor(newColor.B * 255))
+		if callback then
+			SafeCall(callback, newColor)
+		end
+	end)
+	gSlider.Parent = colorPickerMenu
+	gSlider.Position = UDim2.new(0, 10, 0, 110)
+
+	local bSlider = CreateSettingsSlider("Blue", 0, 255, math.floor(defaultColor.B * 255), function(value)
+		local newColor = Color3.new(defaultColor.R, defaultColor.G, value/255)
+		colorPreview.BackgroundColor3 = newColor
+		colorValueLabel.Text = string.format("R:%d G:%d B:%d", 
+			math.floor(newColor.R * 255), 
+			math.floor(newColor.G * 255), 
+			math.floor(newColor.B * 255))
+		if callback then
+			SafeCall(callback, newColor)
+		end
+	end)
+	bSlider.Parent = colorPickerMenu
+	bSlider.Position = UDim2.new(0, 10, 0, 180)
+
+	-- Preset colors
+	local presetColors = {
+		Color3.fromRGB(255, 0, 0),    -- Red
+		Color3.fromRGB(0, 255, 0),    -- Green
+		Color3.fromRGB(0, 0, 255),    -- Blue
+		Color3.fromRGB(255, 255, 0),  -- Yellow
+		Color3.fromRGB(255, 0, 255),  -- Magenta
+		Color3.fromRGB(0, 255, 255),  -- Cyan
+		Color3.fromRGB(255, 255, 255), -- White
+		Color3.fromRGB(0, 0, 0),      -- Black
+		Color3.fromRGB(128, 128, 128), -- Gray
+		Color3.fromRGB(255, 165, 0),  -- Orange
+		Color3.fromRGB(128, 0, 128),  -- Purple
+		Color3.fromRGB(0, 128, 128)   -- Teal
+	}
+
+	local presetContainer = Instance.new("Frame")
+	presetContainer.Parent = colorPickerMenu
+	presetContainer.BackgroundTransparency = 1
+	presetContainer.Position = UDim2.new(0, 10, 0, 250)
+	presetContainer.Size = UDim2.new(1, -20, 0, 40)
+
+	local presetLayout = Instance.new("UIGridLayout")
+	presetLayout.Parent = presetContainer
+	presetLayout.CellSize = UDim2.new(0, 30, 0, 30)
+	presetLayout.CellPadding = UDim2.new(0, 5, 0, 5)
+
+	for i, color in ipairs(presetColors) do
+		local presetBtn = Instance.new("TextButton")
+		presetBtn.Parent = presetContainer
+		presetBtn.BackgroundColor3 = color
+		presetBtn.BorderSizePixel = 1
+		presetBtn.BorderColor3 = themeColor
+		presetBtn.Text = ""
+
+		local presetCorner = Instance.new("UICorner")
+		presetCorner.CornerRadius = UDim.new(0, 2)
+		presetCorner.Parent = presetBtn
+
+		presetBtn.MouseButton1Click:Connect(function()
+			colorPreview.BackgroundColor3 = color
+			colorValueLabel.Text = string.format("R:%d G:%d B:%d", 
+				math.floor(color.R * 255), 
+				math.floor(color.G * 255), 
+				math.floor(color.B * 255))
+			if callback then
+				SafeCall(callback, color)
+			end
+		end)
+	end
+
+	colorBtn.MouseButton1Click:Connect(function()
+		colorPickerMenu.Visible = not colorPickerMenu.Visible
+		if colorPickerMenu.Visible then
+			local btnPos = colorBtn.AbsolutePosition
+			colorPickerMenu.Position = UDim2.new(0, btnPos.X, 0, btnPos.Y + colorBtn.AbsoluteSize.Y + 2)
+		end
+	end)
+
+	-- Close button
+	local closePickerBtn = Instance.new("TextButton")
+	closePickerBtn.Parent = colorPickerMenu
+	closePickerBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+	closePickerBtn.BorderSizePixel = 0
+	closePickerBtn.Position = UDim2.new(1, -30, 0, 5)
+	closePickerBtn.Size = UDim2.new(0, 25, 0, 25)
+	closePickerBtn.Font = Enum.Font.Code
+	closePickerBtn.Text = "X"
+	closePickerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closePickerBtn.TextSize = 14
+
+	local closePickerCorner = Instance.new("UICorner")
+	closePickerCorner.CornerRadius = UDim.new(0, 4)
+	closePickerCorner.Parent = closePickerBtn
+
+	closePickerBtn.MouseButton1Click:Connect(function()
+		colorPickerMenu.Visible = false
+	end)
+
+	return colorFrame
+end
+
+local tabContainer = Instance.new("Frame")
+tabContainer.Parent = SidePanel
+tabContainer.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+tabContainer.BorderColor3 = themeColor
+tabContainer.BorderSizePixel = 2
+tabContainer.Position = UDim2.new(0, 5, 0, 155)
+tabContainer.Size = UDim2.new(1, -10, 0, 270)
+
+local tabContainerCorner = Instance.new("UICorner")
+tabContainerCorner.CornerRadius = UDim.new(0, 6)
+tabContainerCorner.Parent = tabContainer
+
+local tabTitle = Instance.new("TextLabel")
+tabTitle.Parent = tabContainer
+tabTitle.BackgroundTransparency = 1
+tabTitle.Position = UDim2.new(0, 10, 0, 8)
+tabTitle.Size = UDim2.new(1, -20, 0, 20)
+tabTitle.Font = Enum.Font.Code
+tabTitle.Text = "⚡ QUICK ACTIONS"
+tabTitle.TextColor3 = themeColor
+tabTitle.TextSize = 14
+tabTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local tabButtonsContainer = Instance.new("Frame")
+tabButtonsContainer.Parent = tabContainer
+tabButtonsContainer.BackgroundTransparency = 1
+tabButtonsContainer.Position = UDim2.new(0, 5, 0, 35)
+tabButtonsContainer.Size = UDim2.new(1, -10, 0, 30)
+
+local tabContentArea = Instance.new("Frame")
+tabContentArea.Parent = tabContainer
+tabContentArea.BackgroundColor3 = Color3.fromRGB(10, 12, 15)
+tabContentArea.BorderColor3 = themeColor:Lerp(Color3.fromRGB(40, 90, 140), 0.5)
+tabContentArea.BorderSizePixel = 1
+tabContentArea.Position = UDim2.new(0, 5, 0, 70)
+tabContentArea.Size = UDim2.new(1, -10, 1, -100)
+
+local tabContentCorner = Instance.new("UICorner")
+tabContentCorner.CornerRadius = UDim.new(0, 4)
+tabContentCorner.Parent = tabContentArea
+
+local tabs = {}
+local currentTab = nil
+
+local function CreateTabHeaderButton(name, xPos, width)
+	local btn = Instance.new("TextButton")
+	btn.Parent = tabButtonsContainer
+	btn.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+	btn.BorderColor3 = themeColor
+	btn.BorderSizePixel = 1
+	btn.Position = UDim2.new(0, xPos, 0, 0)
+	btn.Size = UDim2.new(0, width, 1, 0)
+	btn.Font = Enum.Font.Code
+	btn.Text = name
+	btn.TextColor3 = themeColor
+	btn.TextSize = 10
+	btn.AutoButtonColor = false
+
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 4)
+	btnCorner.Parent = btn
+
+	btn.MouseEnter:Connect(function()
+		if currentTab ~= name then
+			TweenService:Create(btn, TweenInfo.new(0.2), {
+				BackgroundColor3 = Color3.fromRGB(30, 35, 45)
+			}):Play()
+		end
+	end)
+
+	btn.MouseLeave:Connect(function()
+		if currentTab ~= name then
+			TweenService:Create(btn, TweenInfo.new(0.2), {
+				BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+			}):Play()
+		end
+	end)
+
+	return btn
+end
+
+local function CreateTabContent(name)
+	local content = Instance.new("ScrollingFrame")
+	content.Parent = tabContentArea
+	content.BackgroundTransparency = 1
+	content.BorderSizePixel = 0
+	content.Position = UDim2.new(0, 0, 0, 0)
+	content.Size = UDim2.new(1, 0, 1, 0)
+	content.ScrollBarThickness = 6
+	content.ScrollBarImageColor3 = themeColor
+	content.CanvasSize = UDim2.new(0, 0, 0, 0)
+	content.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	content.Visible = false
+
+	local layout = Instance.new("UIListLayout")
+	layout.Parent = content
+	layout.Padding = UDim.new(0, 5)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	local padding = Instance.new("UIPadding")
+	padding.Parent = content
+	padding.PaddingTop = UDim.new(0, 5)
+	padding.PaddingLeft = UDim.new(0, 5)
+	padding.PaddingRight = UDim.new(0, 10)
+	padding.PaddingBottom = UDim.new(0, 5)
+
+	return content
+end
+
+local function SwitchTab(tabName)
+	if currentTab == tabName then
+		return
+	end
+
+	for name, data in pairs(tabs) do
+		data.content.Visible = false
+		TweenService:Create(data.button, TweenInfo.new(0.2), {
+			BackgroundColor3 = Color3.fromRGB(20, 25, 35),
+			BorderColor3 = themeColor
+		}):Play()
+	end
+
+	if tabs[tabName] then
+		tabs[tabName].content.Visible = true
+		TweenService:Create(tabs[tabName].button, TweenInfo.new(0.2), {
+			BackgroundColor3 = themeColor:Lerp(Color3.fromRGB(20, 25, 35), 0.3),
+			BorderColor3 = themeColor
+		}):Play()
+		currentTab = tabName
+	end
+end
+
+local function CreateActionButton(parent, text, callback, hasSettings)
+	local btn = Instance.new("TextButton")
+	btn.Parent = parent
+	btn.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+	btn.BorderColor3 = themeColor
+	btn.BorderSizePixel = 1
+	btn.Size = UDim2.new(1, -10, 0, 32)
+	btn.Font = Enum.Font.Code
+	btn.Text = text .. (hasSettings and " ⚙" or "")
+	btn.TextColor3 = Color3.fromRGB(200, 200, 200)
+	btn.TextSize = 11
+	btn.AutoButtonColor = false
+
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 4)
+	btnCorner.Parent = btn
+
+	btn.Position = UDim2.new(0, -10, 0, 0)
+	local entranceTween = TweenService:Create(btn, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Position = UDim2.new(0, 0, 0, 0)
+	})
+	entranceTween:Play()
+
+	btn.MouseEnter:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.2), {
+			BackgroundColor3 = Color3.fromRGB(35, 45, 55),
+			BorderColor3 = themeColor:Lerp(Color3.fromRGB(150, 150, 150), 0.3),
+			Size = UDim2.new(1, -5, 0, 34)
+		}):Play()
+	end)
+
+	btn.MouseLeave:Connect(function()
+		TweenService:Create(btn, TweenInfo.new(0.2), {
+			BackgroundColor3 = Color3.fromRGB(25, 30, 40),
+			BorderColor3 = themeColor,
+			Size = UDim2.new(1, -10, 0, 32)
+		}):Play()
+	end)
+
+	if callback then
+		btn.MouseButton1Click:Connect(function()
+			local clickTween = TweenService:Create(btn, TweenInfo.new(0.1), {
+				Size = UDim2.new(1, -15, 0, 28)
+			})
+			clickTween:Play()
+			clickTween.Completed:Connect(function()
+				local restoreTween = TweenService:Create(btn, TweenInfo.new(0.1), {
+					Size = UDim2.new(1, -10, 0, 32)
+				})
+				restoreTween:Play()
+			end)
+
+			SafeCall(callback)
+		end)
+	end
+
+	return btn
+end
+
+local tabNames = {"Combat", "Visual", "Move", "World", "Config"}
+local tabWidth = 72
+local xPosition = 0
+
+for _, tabName in ipairs(tabNames) do
+	local button = CreateTabHeaderButton(tabName, xPosition, tabWidth)
+	local content = CreateTabContent(tabName)
+
+	tabs[tabName] = {
+		button = button,
+		content = content
+	}
+
+	button.MouseButton1Click:Connect(function()
+		SwitchTab(tabName)
+	end)
+
+	xPosition = xPosition + tabWidth + 3
+end
+
+CreateActionButton(tabs["Combat"].content, "🎯 Aimbot", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ Aimbot SETTINGS"
+
+	State.CamlockEnabled = State.CamlockEnabled or false
+	State.CamlockKey = State.CamlockKey or "Q"
+	State.CamlockTarget = State.CamlockTarget or nil
+	State.CamlockPrediction = State.CamlockPrediction or 0.12
+	State.StickyAim = State.StickyAim or false
+	State.AimAssist = State.AimAssist or false
+
+	CreateSettingsToggle("Aimbot", State.CamlockEnabled, function(enabled)
+		State.CamlockEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Aimbot " .. (enabled and "ENABLED" or "DISABLED") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+		if enabled then
+			ShowNotification("Aimbot", "Press " .. State.CamlockKey .. " to lock onto targets", 3)
+		else
+			State.CamlockTarget = nil
+		end
+	end)
+
+	local keybindFrame = Instance.new("Frame")
+	keybindFrame.Parent = settingsContent
+	keybindFrame.BackgroundTransparency = 1
+	keybindFrame.Size = UDim2.new(1, -10, 0, 60)
+	keybindFrame.LayoutOrder = tick()
+
+	local keybindLabel = Instance.new("TextLabel")
+	keybindLabel.Parent = keybindFrame
+	keybindLabel.BackgroundTransparency = 1
+	keybindLabel.Position = UDim2.new(0, 0, 0, 0)
+	keybindLabel.Size = UDim2.new(1, -70, 0, 20)
+	keybindLabel.Font = Enum.Font.Code
+	keybindLabel.Text = "Aimbot Key"
+	keybindLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	keybindLabel.TextSize = 12
+	keybindLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	local keybindInput = Instance.new("TextBox")
+	keybindInput.Parent = keybindFrame
+	keybindInput.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+	keybindInput.BorderColor3 = themeColor
+	keybindInput.BorderSizePixel = 1
+	keybindInput.Position = UDim2.new(0, 0, 0, 30)
+	keybindInput.Size = UDim2.new(0, 60, 0, 30)
+	keybindInput.Font = Enum.Font.Code
+	keybindInput.Text = State.CamlockKey
+	keybindInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+	keybindInput.TextSize = 11
+	keybindInput.PlaceholderText = "N/A"
+
+	local keybindCorner = Instance.new("UICorner")
+	keybindCorner.CornerRadius = UDim.new(0, 4)
+	keybindCorner.Parent = keybindInput
+
+	keybindInput.FocusLost:Connect(function()
+		if keybindInput.Text ~= "" then
+			State.CamlockKey = keybindInput.Text:upper():sub(1, 1)
+			keybindInput.Text = State.CamlockKey
+			CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Aimbot key set to: " .. State.CamlockKey, Color3.fromRGB(255, 150, 100))
+		end
+	end)
+
+	CreateSettingsDropdown("Method", {"CamLock", "MouseMove"}, "CamLock", function(option)
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Aim method set to: " .. option, Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsDropdown("Sort Type", {"Near Crosshair", "Nearest", "Distance"}, "Near Crosshair", function(option)
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Target sorting set to: " .. option, Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsDropdown("Select Part", {"Head", "Torso", "HumanoidRootPart", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}, "Head", function(option)
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Targeting body part: " .. option, Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsSlider("Smoothness Value", 0.010, 1.000, 0.100, function(value)
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Aim smoothing set to: " .. string.format("%.3f", value), Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsToggle("ResolveCam", false, function(enabled)
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Anti-lock bypass (Resolve Aimbot): " .. (enabled and "Enabled" or "Disabled"), Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsToggle("Toggle CamLock", false, function(enabled)
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Toggle Aimbot: " .. (enabled and "Enabled" or "Disabled"), Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsToggle("Predict", false, function(enabled)
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Movement prediction: " .. (enabled and "Enabled" or "Disabled"), Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsSlider("Prediction Value ", -1, 1, 0, function(value)
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Prediction" .. string.format("%.3f", value), Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsToggle("Sticky", State.StickyAim, function(enabled)
+		State.StickyAim = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Sticky aim: " .. (enabled and "Enabled" or "Disabled") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	-- Add checks dropdown
+	CreateSettingsDropdown("Checks", {"Team Check", "Wall Check", "Alive Check"}, "None", function(option)
+		if option == "Team Check" then
+			State.AimbotTeamCheck = not State.AimbotTeamCheck
+			CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Team Check: " .. (State.AimbotTeamCheck and "Enabled" or "Disabled") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+		elseif option == "Wall Check" then
+			State.AimbotWallCheck = not State.AimbotWallCheck
+			CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Wall Check: " .. (State.AimbotWallCheck and "Enabled" or "Disabled") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+		elseif option == "Alive Check" then
+			State.AimbotAliveCheck = not State.AimbotAliveCheck
+			CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Alive Check: " .. (State.AimbotAliveCheck and "Enabled" or "Disabled") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+		end
+	end)
+end, true)
+
+CreateActionButton(tabs["Combat"].content, "Other Settings", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ OTHER SETTINGS"
+
+	-- Trigger Bot
+	CreateSettingsToggle("Trigger Bot", State.TriggerBotEnabled, function(enabled)
+		State.TriggerBotEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Trigger Bot " .. (enabled and "ENABLED" or "DISABLED") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	local triggerKeyFrame = Instance.new("Frame")
+	triggerKeyFrame.Parent = settingsContent
+	triggerKeyFrame.BackgroundTransparency = 1
+	triggerKeyFrame.Size = UDim2.new(1, -10, 0, 60)
+	triggerKeyFrame.LayoutOrder = tick()
+
+	local triggerKeyLabel = Instance.new("TextLabel")
+	triggerKeyLabel.Parent = triggerKeyFrame
+	triggerKeyLabel.BackgroundTransparency = 1
+	triggerKeyLabel.Position = UDim2.new(0, 0, 0, 0)
+	triggerKeyLabel.Size = UDim2.new(1, -70, 0, 20)
+	triggerKeyLabel.Font = Enum.Font.Code
+	triggerKeyLabel.Text = "Trigger Bot Key"
+	triggerKeyLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	triggerKeyLabel.TextSize = 12
+	triggerKeyLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	local triggerKeyInput = Instance.new("TextBox")
+	triggerKeyInput.Parent = triggerKeyFrame
+	triggerKeyInput.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+	triggerKeyInput.BorderColor3 = themeColor
+	triggerKeyInput.BorderSizePixel = 1
+	triggerKeyInput.Position = UDim2.new(0, 0, 0, 30)
+	triggerKeyInput.Size = UDim2.new(0, 60, 0, 30)
+	triggerKeyInput.Font = Enum.Font.Code
+	triggerKeyInput.Text = State.TriggerBotKey
+	triggerKeyInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+	triggerKeyInput.TextSize = 11
+	triggerKeyInput.PlaceholderText = "N/A"
+
+	local triggerKeyCorner = Instance.new("UICorner")
+	triggerKeyCorner.CornerRadius = UDim.new(0, 4)
+	triggerKeyCorner.Parent = triggerKeyInput
+
+	triggerKeyInput.FocusLost:Connect(function()
+		if triggerKeyInput.Text ~= "" then
+			State.TriggerBotKey = triggerKeyInput.Text:upper():sub(1, 1)
+			triggerKeyInput.Text = State.TriggerBotKey
+			CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Trigger Bot key set to: " .. State.TriggerBotKey, Color3.fromRGB(255, 150, 100))
+		end
+	end)
+
+	-- FOV
+	CreateSettingsToggle("FOV", State.FovEnabled, function(enabled)
+		State.FovEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "FOV " .. (enabled and "ENABLED" or "DISABLED") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsSlider("FOV Size", 50, 200, State.FovSize, function(value)
+		State.FovSize = value
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "FOV Size: " .. value .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	-- Other toggles
+	CreateSettingsToggle("Hover UI", State.HoverUIEnabled, function(enabled)
+		State.HoverUIEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hover UI " .. (enabled and "ENABLED" or "DISABLED") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsToggle("Look At", State.LookAtEnabled, function(enabled)
+		State.LookAtEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Look At " .. (enabled and "ENABLED" or "DISABLED") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsToggle("Damage Numbers", State.DamageNumbersEnabled, function(enabled)
+		State.DamageNumbersEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Damage Numbers " .. (enabled and "ENABLED" or "DISABLED") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsDropdown("Hit Sound Type", {"Default", "Metal", "Glass", "Bell", "Custom"}, State.HitSoundType, function(option)
+		State.HitSoundType = option
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hit Sound Type: " .. option .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsToggle("Auto Reload", State.AutoReloadEnabled, function(enabled)
+		State.AutoReloadEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Auto Reload " .. (enabled and "ENABLED" or "DISABLED") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+
+	CreateSettingsToggle("Silent Reload", State.SilentReloadEnabled, function(enabled)
+		State.SilentReloadEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Silent Reload " .. (enabled and "ENABLED" or "DISABLED") .. " (UI only)", Color3.fromRGB(255, 150, 100))
+	end)
+end, true)
+
+CreateActionButton(tabs["Combat"].content, "📦 Hitbox Expander", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ HITBOX EXPANDER"
+
+	CreateSettingsToggle("Enable Hitbox Expander", State.HitboxExpanderEnabled or false, function(enabled)
+		State.HitboxExpanderEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hitbox Expander " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(255, 100, 100))
+	end)
+
+	CreateSettingsSlider("Hitbox Size", 1, 50, State.HitboxSize or 10, function(value)
+		State.HitboxSize = value
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hitbox Size: " .. value, Color3.fromRGB(255, 200, 100))
+	end)
+
+	CreateSettingsToggle("Hitbox Transparency", State.HitboxTransparent or true, function(enabled)
+		State.HitboxTransparent = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hitbox Transparency " .. (enabled and "ON" or "OFF"), Color3.fromRGB(255, 200, 100))
+	end)
+
+	CreateSettingsToggle("Team Check", State.HitboxTeamCheck or false, function(enabled)
+		State.HitboxTeamCheck = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hitbox Team Check " .. (enabled and "ON" or "OFF"), Color3.fromRGB(255, 200, 100))
+	end)
+end, true)
+
+CreateActionButton(tabs["Combat"].content, "🔊 Hit Sound", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ HIT SOUND SETTINGS"
+
+	CreateSettingsToggle("Hit Sound", State.HitSoundEnabled, function(enabled)
+		State.HitSoundEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hit Sound " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(255, 200, 100))
+	end)
+
+	CreateSettingsDropdown("Sound Type", {"Default", "Bell", "Bonk", "Neverlose"}, State.HitSoundType, function(option)
+		State.HitSoundType = option
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hit Sound: " .. option, Color3.fromRGB(255, 200, 100))
+	end)
+
+	CreateSettingsToggle("Damage Number", State.HitSoundEnabled, function(enabled)
+		State.HitSoundEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[COMBAT]", "Hit Sound " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(255, 200, 100))
+	end)
+
+end, true)
+
+
+-- VISUAL TAB
+CreateActionButton(tabs["Visual"].content, "👁 ESP", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ ESP SETTINGS"
+
+	CreateSettingsToggle("Enable ESP", State.ESPEnabled, function(enabled)
+		State.ESPEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "ESP " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateSettingsDropdown("Box Type", {"2D", "3D", "Corner"}, State.ESPBoxType, function(option)
+		State.ESPBoxType = option
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "ESP Box Type: " .. option, Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateSettingsToggle("Team Check", State.ESPTeamCheck, function(enabled)
+		State.ESPTeamCheck = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "ESP Team Check " .. (enabled and "ON" or "OFF"), Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateSettingsToggle("Wall Check", State.ESPWallCheck, function(enabled)
+		State.ESPWallCheck = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "ESP Wall Check " .. (enabled and "ON" or "OFF"), Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateSettingsToggle("Alive Check", State.ESPAliveCheck, function(enabled)
+		State.ESPAliveCheck = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "ESP Alive Check " .. (enabled and "ON" or "OFF"), Color3.fromRGB(100, 255, 255))
+	end)
+end, true)
+
+CreateActionButton(tabs["Visual"].content, "💡 Fullbright", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ FULLBRIGHT"
+
+	CreateSettingsToggle("Enable Fullbright", State.Fullbright, function(enabled)
+		State.Fullbright = enabled
+		if enabled then
+			Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+			Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+			Lighting.Brightness = 2
+		else
+			Lighting.Ambient = State.AmbientColor
+			Lighting.OutdoorAmbient = State.OutdoorAmbientColor
+			Lighting.Brightness = 1
+		end
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Fullbright " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 255))
+	end)
+end, true)
+
+CreateActionButton(tabs["Visual"].content, "🌅 Ambience", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ AMBIENCE SETTINGS"
+
+	CreateSettingsToggle("Enable Ambience", State.AmbienceEnabled, function(enabled)
+		State.AmbienceEnabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Ambience " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateSettingsSlider("Brightness", 0, 5, State.AmbientBrightness, function(value)
+		State.AmbientBrightness = value
+		if State.AmbienceEnabled then
+			Lighting.Brightness = value
+		end
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Brightness: " .. value, Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateSettingsSlider("Fog End", 100, 10000, State.AmbienceFogEnd, function(value)
+		State.AmbienceFogEnd = value
+		if State.AmbienceEnabled then
+			Lighting.FogEnd = value
+		end
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Fog End: " .. value, Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateSettingsSlider("Time of Day", 0, 24, State.AmbienceTimeOfDay, function(value)
+		State.AmbienceTimeOfDay = value
+		if State.AmbienceEnabled then
+			Lighting.ClockTime = value
+		end
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Time: " .. value .. ":00", Color3.fromRGB(100, 255, 255))
+	end)
+end, true)
+
+CreateActionButton(tabs["Visual"].content, "🛡️ Avatar FF", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ AVATAR FORCEFIELD"
+
+	CreateSettingsToggle("Enable Avatar Forcefield", State.AvatarForcefieldEnabled, function(enabled)
+		State.AvatarForcefieldEnabled = enabled
+		local char = localPlayer.Character
+		if char then
+			if enabled then
+				local ff = Instance.new("ForceField")
+				ff.Name = "NerdWareFF"
+				ff.Parent = char
+			else
+				local ff = char:FindFirstChild("NerdWareFF")
+				if ff then ff:Destroy() end
+			end
+		end
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Avatar FF " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 255))
+	end)
+end, true)
+
+CreateActionButton(tabs["Visual"].content, "🎨 Colors", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ COLOR SETTINGS"
+
+	CreateColorPicker("Ambient Color", State.AmbientColor, function(color)
+		State.AmbientColor = color
+		Lighting.Ambient = color
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Ambient Color updated", Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateColorPicker("Outdoor Ambient", State.OutdoorAmbientColor, function(color)
+		State.OutdoorAmbientColor = color
+		Lighting.OutdoorAmbient = color
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Outdoor Ambient updated", Color3.fromRGB(100, 255, 255))
+	end)
+
+	CreateColorPicker("Fog Color", State.FogColor, function(color)
+		State.FogColor = color
+		Lighting.FogColor = color
+		CreateTerminalMessage(GetCurrentTime(), "[VISUAL]", "Fog Color updated", Color3.fromRGB(100, 255, 255))
+	end)
+end, true)
+
+-- UPDATED MOVEMENT TAB WITH ALL NEW FEATURES
+
+CreateActionButton(tabs["Move"].content, "🏃 Walk Speed", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ WALK SPEED"
+
+	CreateSettingsToggle("Enable Speed", State.SpeedEnabled, function(enabled)
+		State.SpeedEnabled = enabled
+		movement.speed.enabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Speed " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 100))
+	end)
+
+	CreateSettingsSlider("Speed", 16, 500, State.SpeedAmount, function(value)
+		State.SpeedAmount = value
+		movement.speed.amount = value
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Speed set to: " .. value, Color3.fromRGB(100, 255, 100))
+	end)
+
+	local keybindFrame = Instance.new("Frame")
+	keybindFrame.Parent = settingsContent
+	keybindFrame.BackgroundTransparency = 1
+	keybindFrame.Size = UDim2.new(1, -10, 0, 60)
+	keybindFrame.LayoutOrder = tick()
+
+	local keybindLabel = Instance.new("TextLabel")
+	keybindLabel.Parent = keybindFrame
+	keybindLabel.BackgroundTransparency = 1
+	keybindLabel.Position = UDim2.new(0, 0, 0, 0)
+	keybindLabel.Size = UDim2.new(1, -70, 0, 20)
+	keybindLabel.Font = Enum.Font.Code
+	keybindLabel.Text = "Speed Keybind"
+	keybindLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	keybindLabel.TextSize = 12
+	keybindLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	local keybindInput = Instance.new("TextBox")
+	keybindInput.Parent = keybindFrame
+	keybindInput.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+	keybindInput.BorderColor3 = themeColor
+	keybindInput.BorderSizePixel = 1
+	keybindInput.Position = UDim2.new(0, 0, 0, 30)
+	keybindInput.Size = UDim2.new(0, 60, 0, 30)
+	keybindInput.Font = Enum.Font.Code
+	keybindInput.Text = State.SpeedKeybind
+	keybindInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+	keybindInput.TextSize = 11
+	keybindInput.PlaceholderText = "N/A"
+
+	local keybindCorner = Instance.new("UICorner")
+	keybindCorner.CornerRadius = UDim.new(0, 4)
+	keybindCorner.Parent = keybindInput
+
+	keybindInput.FocusLost:Connect(function()
+		if keybindInput.Text ~= "" then
+			State.SpeedKeybind = keybindInput.Text:upper():sub(1, 1)
+			movement.speed.keybind = Enum.KeyCode[State.SpeedKeybind]
+			keybindInput.Text = State.SpeedKeybind
+			CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Speed keybind set to: " .. State.SpeedKeybind, Color3.fromRGB(100, 255, 100))
+		end
+	end)
+
+	CreateSettingsToggle("Auto-Apply on Respawn", true, function(enabled)
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Auto-apply " .. (enabled and "ON" or "OFF"), Color3.fromRGB(100, 255, 100))
+	end)
+end, true)
+
+CreateActionButton(tabs["Move"].content, "🦘 Jump Power", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ JUMP POWER"
+
+	CreateSettingsSlider("Power", 50, 500, State.JumpPower, function(value)
+		State.JumpPower = value
+		if localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid") then
+			localPlayer.Character.Humanoid.JumpPower = value
+		end
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Jump power: " .. value, Color3.fromRGB(100, 255, 100))
+	end)
+
+	CreateSettingsToggle("Infinite Jump", State.InfiniteJump, function(enabled)
+		toggleInfiniteJump(enabled)
+	end)
+end, true)
+
+CreateActionButton(tabs["Move"].content, "✈️ Fly", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ FLY SETTINGS"
+
+	CreateSettingsDropdown("Fly Type", {"Fly V1", "Fly V2"}, "Fly V1", function(option)
+		if option == "Fly V1" then
+			State.FlyEnabled = true
+			State.FlyV2Enabled = false
+			if movement.flyV2.flying then
+				stopFlyingV2()
+			end
+			movement.fly.enabled = true
+			CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Fly V1 ENABLED", Color3.fromRGB(100, 255, 100))
+		else
+			State.FlyEnabled = false
+			State.FlyV2Enabled = true
+			movement.fly.enabled = false
+			startFlyingV2()
+			CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Fly V2 ENABLED", Color3.fromRGB(100, 255, 100))
+		end
+	end)
+
+	CreateSettingsSlider("Fly Speed", 50, 2000, State.FlyAmount, function(value)
+		State.FlyAmount = value
+		movement.fly.amount = value
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Fly speed: " .. value, Color3.fromRGB(100, 255, 100))
+	end)
+
+	local flyKeybindFrame = Instance.new("Frame")
+	flyKeybindFrame.Parent = settingsContent
+	flyKeybindFrame.BackgroundTransparency = 1
+	flyKeybindFrame.Size = UDim2.new(1, -10, 0, 60)
+	flyKeybindFrame.LayoutOrder = tick()
+
+	local flyKeybindLabel = Instance.new("TextLabel")
+	flyKeybindLabel.Parent = flyKeybindFrame
+	flyKeybindLabel.BackgroundTransparency = 1
+	flyKeybindLabel.Position = UDim2.new(0, 0, 0, 0)
+	flyKeybindLabel.Size = UDim2.new(1, -70, 0, 20)
+	flyKeybindLabel.Font = Enum.Font.Code
+	flyKeybindLabel.Text = "Fly Keybind"
+	flyKeybindLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	flyKeybindLabel.TextSize = 12
+	flyKeybindLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	local flyKeybindInput = Instance.new("TextBox")
+	flyKeybindInput.Parent = flyKeybindFrame
+	flyKeybindInput.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+	flyKeybindInput.BorderColor3 = themeColor
+	flyKeybindInput.BorderSizePixel = 1
+	flyKeybindInput.Position = UDim2.new(0, 0, 0, 30)
+	flyKeybindInput.Size = UDim2.new(0, 60, 0, 30)
+	flyKeybindInput.Font = Enum.Font.Code
+	flyKeybindInput.Text = State.FlyKeybind
+	flyKeybindInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+	flyKeybindInput.TextSize = 11
+	flyKeybindInput.PlaceholderText = "N/A"
+
+	local flyKeybindCorner = Instance.new("UICorner")
+	flyKeybindCorner.CornerRadius = UDim.new(0, 4)
+	flyKeybindCorner.Parent = flyKeybindInput
+
+	flyKeybindInput.FocusLost:Connect(function()
+		if flyKeybindInput.Text ~= "" then
+			State.FlyKeybind = flyKeybindInput.Text:upper():sub(1, 1)
+			movement.fly.keybind = Enum.KeyCode[State.FlyKeybind]
+			flyKeybindInput.Text = State.FlyKeybind
+			CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Fly keybind set to: " .. State.FlyKeybind, Color3.fromRGB(100, 255, 100))
+		end
+	end)
+
+	local flyV2KeybindFrame = Instance.new("Frame")
+	flyV2KeybindFrame.Parent = settingsContent
+	flyV2KeybindFrame.BackgroundTransparency = 1
+	flyV2KeybindFrame.Size = UDim2.new(1, -10, 0, 60)
+	flyV2KeybindFrame.LayoutOrder = tick()
+
+	local flyV2KeybindLabel = Instance.new("TextLabel")
+	flyV2KeybindLabel.Parent = flyV2KeybindFrame
+	flyV2KeybindLabel.BackgroundTransparency = 1
+	flyV2KeybindLabel.Position = UDim2.new(0, 0, 0, 0)
+	flyV2KeybindLabel.Size = UDim2.new(1, -70, 0, 20)
+	flyV2KeybindLabel.Font = Enum.Font.Code
+	flyV2KeybindLabel.Text = "Fly V2 Keybind"
+	flyV2KeybindLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+	flyV2KeybindLabel.TextSize = 12
+	flyV2KeybindLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+	local flyV2KeybindInput = Instance.new("TextBox")
+	flyV2KeybindInput.Parent = flyV2KeybindFrame
+	flyV2KeybindInput.BackgroundColor3 = Color3.fromRGB(25, 30, 40)
+	flyV2KeybindInput.BorderColor3 = themeColor
+	flyV2KeybindInput.BorderSizePixel = 1
+	flyV2KeybindInput.Position = UDim2.new(0, 0, 0, 30)
+	flyV2KeybindInput.Size = UDim2.new(0, 60, 0, 30)
+	flyV2KeybindInput.Font = Enum.Font.Code
+	flyV2KeybindInput.Text = State.FlyV2Keybind
+	flyV2KeybindInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+	flyV2KeybindInput.TextSize = 11
+	flyV2KeybindInput.PlaceholderText = "N/A"
+
+	local flyV2KeybindCorner = Instance.new("UICorner")
+	flyV2KeybindCorner.CornerRadius = UDim.new(0, 4)
+	flyV2KeybindCorner.Parent = flyV2KeybindInput
+
+	flyV2KeybindInput.FocusLost:Connect(function()
+		if flyV2KeybindInput.Text ~= "" then
+			State.FlyV2Keybind = flyV2KeybindInput.Text:upper():sub(1, 1)
+			movement.flyV2.keybind = Enum.KeyCode[State.FlyV2Keybind]
+			flyV2KeybindInput.Text = State.FlyV2Keybind
+			CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Fly V2 keybind set to: " .. State.FlyV2Keybind, Color3.fromRGB(100, 255, 100))
+		end
+	end)
+end, true)
+
+CreateActionButton(tabs["Move"].content, "👻 Noclip", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ NOCLIP SETTINGS"
+
+	CreateSettingsToggle("Enable Noclip", State.NoClip, function(enabled)
+		toggleNoClip(enabled)
+	end)
+
+	CreateSettingsToggle("Auto Noclip", false, function(enabled)
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Auto Noclip " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 100))
+	end)
+end, true)
+
+CreateActionButton(tabs["Move"].content, "🌀 Advanced", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ ADVANCED MOVEMENT"
+
+	CreateSettingsToggle("No Jump Cooldown", State.NoJumpCooldownEnabled, function(enabled)
+		State.NoJumpCooldownEnabled = enabled
+		toggleNoJumpCooldown(enabled)
+	end)
+
+	CreateSettingsToggle("Anti-Slow", State.AntiSlowEnabled, function(enabled)
+		State.AntiSlowEnabled = enabled
+		antiSlowToggle(enabled)
+	end)
+
+	CreateSettingsToggle("SpinBot", State.SpinBotEnabled, function(enabled)
+		State.SpinBotEnabled = enabled
+		movement.spinBot.enabled = enabled
+		applySpinBot()
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "SpinBot " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(100, 255, 100))
+	end)
+
+	CreateSettingsSlider("Spin Speed", 10, 200, State.SpinBotSpeed, function(value)
+		State.SpinBotSpeed = value
+		movement.spinBot.speed = value
+		if movement.spinBot.angularVelocity then
+			movement.spinBot.angularVelocity.AngularVelocity = Vector3.new(0, value, 0)
+		end
+		CreateTerminalMessage(GetCurrentTime(), "[MOVE]", "Spin speed: " .. value, Color3.fromRGB(100, 255, 100))
+	end)
+
+	CreateActionButton(settingsContent, "🔄 Force Reset (R)", function()
+		forceReset()
+	end)
+end, true)
+
+SwitchTab("Move")
+
+CreateActionButton(tabs["World"].content, "🌍 Server Info", function()
+	local messages = {
+		"═══════════════════════════",
+		"SERVER INFORMATION",
+		"═══════════════════════════",
+		"Job ID: " .. game.JobId,
+		"Place ID: " .. game.PlaceId,
+		"Game Name: " .. game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name,
+		"Players: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers,
+		"Server Region: " .. game:GetService("LocalizationService").RobloxLocaleId,
+		"Ping: " .. math.floor(localPlayer:GetNetworkPing() * 1000) .. "ms",
+		"═══════════════════════════"
+	}
+	CreateMultiLineTerminalMessage(GetCurrentTime(), "[WORLD]", messages, Color3.fromRGB(100, 180, 255))
+end)
+
+CreateActionButton(tabs["World"].content, "👥 Player List", function()
+	local players = Players:GetPlayers()
+	local messages = {"═══════════════════════════", "PLAYER LIST (" .. #players .. " online)", "═══════════════════════════"}
+
+	for i, player in ipairs(players) do
+		local prefix = player == localPlayer and "[YOU] " or ""
+		if player.Name ~= player.DisplayName then
+			table.insert(messages, i .. ". " .. prefix .. player.Name .. " (" .. player.DisplayName .. ")")
+		else
+			table.insert(messages, i .. ". " .. prefix .. player.Name)
+		end
+	end
+
+	table.insert(messages, "═══════════════════════════")
+	CreateMultiLineTerminalMessage(GetCurrentTime(), "[WORLD]", messages, Color3.fromRGB(100, 180, 255))
+end)
+
+CreateActionButton(tabs["World"].content, "🔄 Server Hop", function()
+	CreateTerminalMessage(GetCurrentTime(), "[WORLD]", "Searching for new server... (UI only)", Color3.fromRGB(100, 180, 255))
+	ShowNotification("Server Hop", "Finding a new server... (UI only)", 2)
+end)
+
+CreateActionButton(tabs["World"].content, "🔁 Rejoin", function()
+	CreateTerminalMessage(GetCurrentTime(), "[WORLD]", "Rejoining server... (UI only)", Color3.fromRGB(100, 180, 255))
+	ShowNotification("Rejoin", "Reconnecting to server... (UI only)", 2)
+end)
+
+CreateActionButton(tabs["World"].content, "📋 Copy Job ID", function()
+	if setclipboard then
+		setclipboard(game.JobId)
+		CreateTerminalMessage(GetCurrentTime(), "[WORLD]", "Job ID copied: " .. game.JobId, Color3.fromRGB(100, 180, 255))
+		ShowNotification("Clipboard", "Job ID copied!", 2)
+	else
+		CreateTerminalMessage(GetCurrentTime(), "[ERROR]", "Clipboard not supported", Color3.fromRGB(255, 100, 100))
+	end
+end)
+
+CreateActionButton(tabs["World"].content, "🎮 Game Stats", function()
+	local stats = game:GetService("Stats")
+	local messages = {
+		"═══════════════════════════",
+		"GAME STATISTICS",
+		"═══════════════════════════",
+		"Physics FPS: " .. math.floor(1 / stats.HeartbeatTimeMs:GetValue()),
+		"Data Recv: " .. math.floor(stats.DataReceiveKbps:GetValue()) .. " Kbps",
+		"Data Send: " .. math.floor(stats.DataSendKbps:GetValue()) .. " Kbps",
+		"Memory: " .. math.floor(stats:GetTotalMemoryUsageMb()) .. " MB",
+		"Ping: " .. math.floor(localPlayer:GetNetworkPing() * 1000) .. "ms",
+		"═══════════════════════════"
+	}
+	CreateMultiLineTerminalMessage(GetCurrentTime(), "[WORLD]", messages, Color3.fromRGB(100, 180, 255))
+end)
+
+CreateActionButton(tabs["Config"].content, "🎨 UI Theme", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ UI THEME"
+
+	CreateSettingsDropdown("Color Theme", {"Blue", "Red", "Green", "Purple", "Orange", "Cyan"}, State.Theme, function(option)
+		State.Theme = option
+		local newColor
+
+		if option == "Blue" then
+			newColor = Color3.fromRGB(80, 180, 255)
+		elseif option == "Red" then
+			newColor = Color3.fromRGB(255, 80, 80)
+		elseif option == "Green" then
+			newColor = Color3.fromRGB(80, 255, 80)
+		elseif option == "Purple" then
+			newColor = Color3.fromRGB(180, 80, 255)
+		elseif option == "Orange" then
+			newColor = Color3.fromRGB(255, 150, 80)
+		elseif option == "Cyan" then
+			newColor = Color3.fromRGB(80, 255, 255)
+		end
+
+		ApplyTheme(newColor)
+		CreateTerminalMessage(GetCurrentTime(), "[CONFIG]", "Theme set to " .. option, Color3.fromRGB(150, 150, 255))
+		ShowNotification("Theme Changed", "UI theme: " .. option, 2)
+	end)
+
+	CreateSettingsToggle("Notifications", State.Notifications, function(enabled)
+		State.Notifications = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[CONFIG]", "Notifications " .. (enabled and "ON" or "OFF"), Color3.fromRGB(150, 150, 255))
+	end)
+
+	CreateSettingsToggle("Auto-Save Settings", State.AutoSave, function(enabled)
+		State.AutoSave = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[CONFIG]", "Auto-save " .. (enabled and "ON" or "OFF"), Color3.fromRGB(150, 150, 255))
+	end)
+end, true)
+
+CreateActionButton(tabs["Config"].content, "💾 Save Config", function()
+	SaveToCloud()
+	CreateTerminalMessage(GetCurrentTime(), "[CONFIG]", "Configuration saved successfully", Color3.fromRGB(100, 255, 100))
+	ShowNotification("Config Saved", "All settings saved!", 2)
+end)
+
+CreateActionButton(tabs["Config"].content, "📁 Load Config", function()
+	LoadFromCloud()
+	CreateTerminalMessage(GetCurrentTime(), "[CONFIG]", "Configuration loaded successfully", Color3.fromRGB(100, 255, 100))
+	ShowNotification("Config Loaded", "Settings restored!", 2)
+end)
+
+CreateActionButton(tabs["Config"].content, "🔄 Reset Settings", function()
+	State.WalkSpeed = 16
+	State.JumpPower = 50
+	State.GodMode = false
+	State.Flying = false
+	State.NoClip = false
+	State.ESPEnabled = false
+	State.Fullbright = false
+
+	CreateTerminalMessage(GetCurrentTime(), "[CONFIG]", "All settings reset to default", Color3.fromRGB(255, 180, 100))
+	ShowNotification("Reset", "Settings restored to default", 2)
+end)
+
+CreateActionButton(tabs["Config"].content, "📊 Command History", function()
+	if #State.CommandHistory == 0 then
+		CreateTerminalMessage(GetCurrentTime(), "[CONFIG]", "No command history yet", Color3.fromRGB(150, 150, 255))
+	else
+		local messages = {"═══════════════════════════", "COMMAND HISTORY (Last " .. math.min(#State.CommandHistory, 10) .. ")", "═══════════════════════════"}
+
+		local start = math.max(1, #State.CommandHistory - 9)
+		for i = start, #State.CommandHistory do
+			local cmd = State.CommandHistory[i]
+			table.insert(messages, "[" .. cmd.time .. "] " .. cmd.command)
+		end
+
+		table.insert(messages, "═══════════════════════════")
+		CreateMultiLineTerminalMessage(GetCurrentTime(), "[CONFIG]", messages, Color3.fromRGB(150, 150, 255))
+	end
+end)
+
+CreateActionButton(tabs["Config"].content, "❌ Destroy GUI", function()
+	CreateTerminalMessage(GetCurrentTime(), "[SYSTEM]", "Destroying GUI in 3 seconds...", Color3.fromRGB(255, 100, 100))
+	ShowNotification("Goodbye!", "GUI will be destroyed in 3s", 3)
+
+	local fadeOut = TweenService:Create(MainFrame, TweenInfo.new(2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		BackgroundTransparency = 1
+	})
+	fadeOut:Play()
+
+	task.wait(3)
+	ScreenGui:Destroy()
+end)
+
+CreateActionButton(tabs["Config"].content, "🛡️ Security Settings", function()
+	ClearSettingsPanel()
+	settingsPanel.Visible = true
+	settingsPanelTitle.Text = "⚙ SECURITY SETTINGS"
+
+	CreateSettingsToggle("Anti-Detection", AntiDetection.RandomDelays, function(enabled)
+		AntiDetection.RandomDelays = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[SECURITY]", "Anti-Detection " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(255, 200, 100))
+	end)
+
+	CreateSettingsToggle("GUI Protection", GUIProtection.Enabled, function(enabled)
+		GUIProtection.Enabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[SECURITY]", "GUI Protection " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(255, 200, 100))
+	end)
+
+	CreateSettingsToggle("Anti-AFK", AntiAFK.Enabled, function(enabled)
+		AntiAFK.Enabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[SECURITY]", "Anti-AFK " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(255, 200, 100))
+	end)
+
+	CreateSettingsToggle("Cloud Save", CloudSave.Enabled, function(enabled)
+		CloudSave.Enabled = enabled
+		CreateTerminalMessage(GetCurrentTime(), "[SECURITY]", "Cloud Save " .. (enabled and "ENABLED" or "DISABLED"), Color3.fromRGB(255, 200, 100))
+	end)
+end, true)
+
+SwitchTab("Combat")
+
+local commandBox = Instance.new("Frame")
+commandBox.Parent = SidePanel
+commandBox.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+commandBox.BorderColor3 = themeColor
+commandBox.BorderSizePixel = 2
+commandBox.Position = UDim2.new(0, 5, 0, 435)
+commandBox.Size = UDim2.new(1, -10, 0, 210)
+
+local commandBoxCorner = Instance.new("UICorner")
+commandBoxCorner.CornerRadius = UDim.new(0, 6)
+commandBoxCorner.Parent = commandBox
+
+local commandTitle = Instance.new("TextLabel")
+commandTitle.Parent = commandBox
+commandTitle.BackgroundTransparency = 1
+commandTitle.Position = UDim2.new(0, 10, 0, 8)
+commandTitle.Size = UDim2.new(1, -20, 0, 20)
+commandTitle.Font = Enum.Font.Code
+commandTitle.Text = "⌨ COMMAND CONSOLE"
+commandTitle.TextColor3 = themeColor
+commandTitle.TextSize = 14
+commandTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local commandInput = Instance.new("TextBox")
+commandInput.Parent = commandBox
+commandInput.BackgroundColor3 = Color3.fromRGB(10, 12, 15)
+commandInput.BorderColor3 = themeColor
+commandInput.BorderSizePixel = 1
+commandInput.Position = UDim2.new(0, 10, 0, 35)
+commandInput.Size = UDim2.new(1, -20, 0, 32)
+commandInput.Font = Enum.Font.Code
+commandInput.PlaceholderText = "Enter command... (Type /help for commands)"
+commandInput.Text = ""
+commandInput.TextColor3 = Color3.fromRGB(200, 200, 200)
+commandInput.TextSize = 11
+commandInput.TextXAlignment = Enum.TextXAlignment.Left
+commandInput.ClearTextOnFocus = false
+
+local cmdInputCorner = Instance.new("UICorner")
+cmdInputCorner.CornerRadius = UDim.new(0, 4)
+cmdInputCorner.Parent = commandInput
+
+commandInput.Focused:Connect(function()
+	TweenService:Create(commandInput, TweenInfo.new(0.2), {
+		BackgroundColor3 = Color3.fromRGB(15, 18, 22),
+		BorderColor3 = themeColor:Lerp(Color3.fromRGB(255, 255, 255), 0.3)
+	}):Play()
+end)
+
+commandInput.FocusLost:Connect(function()
+	TweenService:Create(commandInput, TweenInfo.new(0.2), {
+		BackgroundColor3 = Color3.fromRGB(10, 12, 15),
+		BorderColor3 = themeColor
+	}):Play()
+end)
+
+local suggestionLabel = Instance.new("TextLabel")
+suggestionLabel.Parent = commandBox
+suggestionLabel.BackgroundTransparency = 1
+suggestionLabel.Position = UDim2.new(0, 10, 0, 70)
+suggestionLabel.Size = UDim2.new(1, -20, 0, 15)
+suggestionLabel.Font = Enum.Font.Code
+suggestionLabel.Text = ""
+suggestionLabel.TextColor3 = Color3.fromRGB(100, 100, 110)
+suggestionLabel.TextSize = 10
+suggestionLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+local executeBtn = Instance.new("TextButton")
+executeBtn.Parent = commandBox
+executeBtn.BackgroundColor3 = themeColor
+executeBtn.BorderSizePixel = 0
+executeBtn.Position = UDim2.new(0, 10, 0, 90)
+executeBtn.Size = UDim2.new(1, -20, 0, 32)
+executeBtn.Font = Enum.Font.Code
+executeBtn.Text = "▶ EXECUTE COMMAND"
+executeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+executeBtn.TextSize = 12
+executeBtn.AutoButtonColor = false
+
+local executeBtnCorner = Instance.new("UICorner")
+executeBtnCorner.CornerRadius = UDim.new(0, 4)
+executeBtnCorner.Parent = executeBtn
+
+executeBtn.MouseEnter:Connect(function()
+	TweenService:Create(executeBtn, TweenInfo.new(0.2), {
+		BackgroundColor3 = themeColor:Lerp(Color3.fromRGB(255, 255, 255), 0.2),
+		Size = UDim2.new(1, -15, 0, 34)
+	}):Play()
+end)
+
+executeBtn.MouseLeave:Connect(function()
+	TweenService:Create(executeBtn, TweenInfo.new(0.2), {
+		BackgroundColor3 = themeColor,
+		Size = UDim2.new(1, -20, 0, 32)
+	}):Play()
+end)
+
+executeBtn.MouseButton1Click:Connect(function()
+	local clickTween = TweenService:Create(executeBtn, TweenInfo.new(0.1), {
+		Size = UDim2.new(1, -25, 0, 28)
+	})
+	clickTween:Play()
+	clickTween.Completed:Connect(function()
+		local restoreTween = TweenService:Create(executeBtn, TweenInfo.new(0.1), {
+			Size = UDim2.new(1, -20, 0, 32)
+		})
+		restoreTween:Play()
+	end)
+
+	SafeCall(executeCommand)
+end)
+
+local commandsList = Instance.new("TextLabel")
+commandsList.Parent = commandBox
+commandsList.BackgroundTransparency = 1
+commandsList.Position = UDim2.new(0, 10, 0, 130)
+commandsList.Size = UDim2.new(1, -20, 0, 70)
+commandsList.Font = Enum.Font.Code
+commandsList.Text = [[Quick Commands: /help, /players, /playerid
+Movement: /tp [name], /view [name], /bang [name], /fling [name]
+Fun: /pusheen
+Stop Actions: /view (stop), /bang (stop), /fling (stop)
+💡 Tip: Commands work with partial names!]]
+commandsList.TextColor3 = Color3.fromRGB(120, 120, 130)
+commandsList.TextSize = 10
+commandsList.TextXAlignment = Enum.TextXAlignment.Left
+commandsList.TextYAlignment = Enum.TextYAlignment.Top
+commandsList.TextWrapped = true
+
+local function findPlayerByNameOrDisplayName(name)
+	if not name or name == "" then
+		return nil, nil
+	end
+
+	name = name:lower()
+	local matches = {}
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Name:lower() == name or player.DisplayName:lower() == name then
+			return player, nil
+		end
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local username = player.Name:lower()
+		local displayname = player.DisplayName:lower()
+
+		if username:find(name, 1, true) or displayname:find(name, 1, true) then
+			table.insert(matches, player)
+		end
+	end
+
+	if #matches == 1 then
+		return matches[1], nil
+	elseif #matches > 1 then
+		local bestMatch = matches[1]
+		local shortestLength = #bestMatch.Name
+
+		for _, player in ipairs(matches) do
+			if #player.Name < shortestLength then
+				bestMatch = player
+				shortestLength = #player.Name
+			end
+		end
+
+		return bestMatch, matches
+	end
+
+	return nil, nil
+end
+
+commandInput:GetPropertyChangedSignal("Text"):Connect(function()
+	local text = commandInput.Text:lower()
+	local args = {}
+	for arg in text:gmatch("%S+") do
+		table.insert(args, arg)
+	end
+
+	if #args >= 2 and (args[1] == "/tp" or args[1] == "/view" or args[1] == "/bang" or args[1] == "/fling") then
+		local searchTerm = table.concat(args, " ", 2)
+		local players = Players:GetPlayers()
+		local suggestions = {}
+
+		for _, player in ipairs(players) do
+			if player.Name:lower():find(searchTerm, 1, true) or 
+				player.DisplayName:lower():find(searchTerm, 1, true) then
+				if player.Name ~= player.DisplayName then
+					table.insert(suggestions, player.Name .. " (" .. player.DisplayName .. ")")
+				else
+					table.insert(suggestions, player.Name)
+				end
+			end
+		end
+
+		if #suggestions > 0 then
+			if #suggestions <= 3 then
+				suggestionLabel.Text = "💡 Matches: " .. table.concat(suggestions, ", ")
+			else
+				suggestionLabel.Text = "💡 " .. #suggestions .. " players match your search"
+			end
+
+			suggestionLabel.TextTransparency = 0
+			local fadeIn = TweenService:Create(suggestionLabel, TweenInfo.new(0.2), {
+				TextTransparency = 0
+			})
+			fadeIn:Play()
+		else
+			local fadeOut = TweenService:Create(suggestionLabel, TweenInfo.new(0.2), {
+				TextTransparency = 1
+			})
+			fadeOut:Play()
+			fadeOut.Completed:Connect(function()
+				suggestionLabel.Text = ""
+			end)
+		end
+	else
+		if suggestionLabel.Text ~= "" then
+			local fadeOut = TweenService:Create(suggestionLabel, TweenInfo.new(0.2), {
+				TextTransparency = 1
+			})
+			fadeOut:Play()
+			fadeOut.Completed:Connect(function()
+				suggestionLabel.Text = ""
+			end)
+		end
+	end
+end)
+
+-- Fling functions
+local function safeHRP(char)
+	if not char then return nil end
+	return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
+end
+
+local function horizontalLook(fromPos, toPos)
+	local dir = toPos - fromPos
+	dir = Vector3.new(dir.X, 0, dir.Z)
+	if dir.Magnitude == 0 then return CFrame.new(fromPos) end
+	return CFrame.new(fromPos, fromPos + dir.Unit)
+end
+
+local function localPush(strength, life)
+	local char = localPlayer.Character
+	if not char then return end
+	local hrp = safeHRP(char)
+	if not hrp then return end
+	local bv = Instance.new("BodyVelocity")
+	bv.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+	bv.Velocity = hrp.CFrame.LookVector * strength + Vector3.new(0, 120, 0)
+	bv.Parent = hrp
+	Debris:AddItem(bv, life or 0.12)
+end
+
+local function clearSpin(hrp)
+	if not hrp then return end
+	for _, child in ipairs(hrp:GetChildren()) do
+		if child:IsA("BodyAngularVelocity") and child.Name == "LocalSpin" then
+			child:Destroy()
+		end
+	end
+end
+
+local function applySpin(hrp, angVel)
+	if not hrp then return end
+	clearSpin(hrp)
+	local bav = Instance.new("BodyAngularVelocity")
+	bav.Name = "LocalSpin"
+	bav.MaxTorque = Vector3.new(1e8, 1e8, 1e8)
+	bav.AngularVelocity = angVel or Vector3.new(0, 12000, 0)
+	bav.Parent = hrp
+	return bav
+end
+
+local function overlapInto(targetHrp)
+	local char = localPlayer.Character
+	if not char or not targetHrp or not targetHrp.Parent then return false end
+	local hrp = safeHRP(char)
+	if not hrp then return false end
+
+	-- Enable noclip temporarily
+	local originalCanCollide = {}
+	for _, part in ipairs(char:GetDescendants()) do
+		if part:IsA("BasePart") then
+			originalCanCollide[part] = part.CanCollide
+			part.CanCollide = false
+		end
+	end
+
+	for _ = 1, 5 do
+		local offset = Vector3.new((math.random()-0.5)*0.4, (math.random()-0.5)*0.2, (math.random()-0.5)*0.4)
+		local destPos = targetHrp.Position + offset
+		local faceCf = horizontalLook(destPos, targetHrp.Position)
+		pcall(function() hrp.CFrame = CFrame.new(destPos) end)
+		pcall(function() hrp.CFrame = faceCf end)
+		RunService.RenderStepped:Wait()
+	end
+
+	-- Restore original collision settings
+	for part, canCollide in pairs(originalCanCollide) do
+		if part and part.Parent then
+			part.CanCollide = canCollide
+		end
+	end
+
+	return true
+end
+
+local function holdAndSpin(target, duration, spinSpeed)
+	local char = localPlayer.Character
+	if not char then return end
+	local hrp = safeHRP(char)
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hrp or not hum then return end
+	local thrp = safeHRP(target.Character)
+	if not thrp then return end
+	overlapInto(thrp)
+	local spinObj = applySpin(hrp, Vector3.new(0, spinSpeed, 0))
+	local stopAt = tick() + duration
+	while tick() < stopAt do
+		if not player.Character or not target.Character or not thrp.Parent then break end
+		pcall(overlapInto, thrp)
+		localPush(90 + math.random(-10, 10), 0.12)
+		RunService.Heartbeat:Wait()
+	end
+	if spinObj and spinObj.Parent then spinObj:Destroy() end
+	clearSpin(hrp)
+end
+
+local running = false
+local SPIN_SPEED = 12000
+
+local function flingTarget(target)
+	if running or not target then return end
+	running = true
+
+	local char = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+
+	while running and target.Character do
+		pcall(function() holdAndSpin(target, math.random(2, 3), SPIN_SPEED) end)
+		task.wait(0.1)
+		if not running then break end
+	end
+
+	running = false
+end
+
+local function stopFling()
+	running = false
+	local char = localPlayer.Character
+	if char then
+		local hrp = safeHRP(char)
+		clearSpin(hrp)
+	end
+end
+
+local function executeCommand()
+	RandomizeExecution()
+	TrackExecution()
+
+	if commandInput.Text == "" then return end
+
+	local timestamp = GetCurrentTime()
+	local command = commandInput.Text:lower():match("^%s*(.-)%s*$")
+	local args = {}
+	for arg in commandInput.Text:gmatch("%S+") do
+		table.insert(args, arg)
+	end
+
+	CreateTerminalMessage(timestamp, "[CMD]", commandInput.Text, Color3.fromRGB(200, 200, 255))
+
+	if command == "/help" then
+		local helpMessages = {
+			"═════════════════════════════════════════════════",
+			"🎮 NERDWAREOS - COMMAND HELP",
+			"═════════════════════════════════════════════════",
+			"",
+			"📋 PLAYER COMMANDS:",
+			"/players - List all players in server",
+			"/playerid - List players with User IDs",
+			"",
+			"🚀 TELEPORT & MOVEMENT:",
+			"/tp [player] - Teleport to a player",
+			"/view [player] - Spectate a player's character",
+			"/view - Stop spectating",
+			"",
+			"🎭 FUN COMMANDS:",
+			"/bang [player] - Start bang animation on player",
+			"/bang - Stop bang animation",
+			"/pusheen - Display Pusheen cat ASCII art",
+			"/fling [player] - Fling a player",
+			"/fling - Stop flinging",
+			"",
+			"ℹ️ INFORMATION:",
+			"/ping - Show your current ping",
+			"/fps - Display current FPS",
+			"/time - Show current server time",
+			"/stats - Display detailed server statistics",
+			"",
+			"💡 TIPS & TRICKS:",
+			"• Use partial names: '/tp joh' finds 'JohnDoe123'",
+			"• Both usernames and display names work",
+			"• Tab system has 50+ features - explore them!",
+			"• Use settings panel to customize each feature",
+			"",
+			"═════════════════════════════════════════════════"
+		}
+		CreateMultiLineTerminalMessage(timestamp, "[HELP]", helpMessages, Color3.fromRGB(100, 200, 255))
+
+	elseif command == "/players" then
+		local players = Players:GetPlayers()
+		local messages = {"═══════════════════════════", "👥 PLAYERS ONLINE (" .. #players .. ")", "═══════════════════════════"}
+
+		if #players == 0 then
+			table.insert(messages, "No players online")
+		else
+			for i, player in ipairs(players) do
+				local prefix = player == localPlayer and "[YOU] " or ""
+				if player.Name ~= player.DisplayName then
+					table.insert(messages, i .. ". " .. prefix .. player.Name .. " (" .. player.DisplayName .. ")")
+				else
+					table.insert(messages, i .. ". " .. prefix .. player.Name)
+				end
+			end
+		end
+
+		table.insert(messages, "═══════════════════════════")
+		CreateMultiLineTerminalMessage(timestamp, "[INFO]", messages, Color3.fromRGB(80, 200, 100))
+
+	elseif command == "/playerid" then
+		local players = Players:GetPlayers()
+		local messages = {"═══════════════════════════", "🆔 PLAYER IDS (" .. #players .. ")", "═══════════════════════════"}
+
+		if #players == 0 then
+			table.insert(messages, "No players online")
+		else
+			for i, player in ipairs(players) do
+				local prefix = player == localPlayer and "[YOU] " or ""
+				if player.Name ~= player.DisplayName then
+					table.insert(messages, i .. ". " .. prefix .. player.Name .. " (" .. player.DisplayName .. ") - ID: " .. player.UserId)
+				else
+					table.insert(messages, i .. ". " .. prefix .. player.Name .. " - ID: " .. player.UserId)
+				end
+			end
+		end
+
+		table.insert(messages, "═══════════════════════════")
+		CreateMultiLineTerminalMessage(timestamp, "[INFO]", messages, Color3.fromRGB(80, 200, 100))
+
+	elseif args[1] == "/tp" and args[2] then
+		local searchTerm = table.concat(args, " ", 2)
+		local targetPlayer, allMatches = findPlayerByNameOrDisplayName(searchTerm)
+
+		if targetPlayer then
+			if allMatches and #allMatches > 1 then
+				local matchNames = {}
+				for _, player in ipairs(allMatches) do
+					if player.Name ~= player.DisplayName then
+						table.insert(matchNames, player.Name .. " (" .. player.DisplayName .. ")")
+					else
+						table.insert(matchNames, player.Name)
+					end
+				end
+				CreateTerminalMessage(timestamp, "[WARNING]", "Multiple matches: " .. table.concat(matchNames, ", "), Color3.fromRGB(255, 180, 100))
+				CreateTerminalMessage(timestamp, "[INFO]", "Teleporting to best match: " .. targetPlayer.Name, Color3.fromRGB(100, 180, 255))
+			end
+
+			if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+				if localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") then
+					localPlayer.Character.HumanoidRootPart.CFrame = targetPlayer.Character.HumanoidRootPart.CFrame
+					CreateTerminalMessage(timestamp, "[SUCCESS]", "✓ Teleported to " .. targetPlayer.Name, Color3.fromRGB(80, 200, 100))
+					ShowNotification("Teleported", "You are now at " .. targetPlayer.Name, 2)
+				else
+					CreateTerminalMessage(timestamp, "[ERROR]", "Your character not loaded", Color3.fromRGB(255, 100, 100))
+				end
+			else
+				CreateTerminalMessage(timestamp, "[ERROR]", "Target player's character not loaded", Color3.fromRGB(255, 100, 100))
+			end
+		else
+			CreateTerminalMessage(timestamp, "[ERROR]", "No player found: '" .. searchTerm .. "'", Color3.fromRGB(255, 100, 100))
+		end
+
+	elseif args[1] == "/view" then
+		if args[2] then
+			local searchTerm = table.concat(args, " ", 2)
+			local targetPlayer = findPlayerByNameOrDisplayName(searchTerm)
+
+			if targetPlayer then
+				if targetPlayer == localPlayer then
+					CreateTerminalMessage(timestamp, "[ERROR]", "Cannot spectate yourself", Color3.fromRGB(255, 100, 100))
+					return
+				end
+
+				if not targetPlayer.Character or not targetPlayer.Character:FindFirstChild("Humanoid") or targetPlayer.Character.Humanoid.Health <= 0 then
+					CreateTerminalMessage(timestamp, "[ERROR]", "Player is not alive", Color3.fromRGB(255, 100, 100))
+					return
+				end
+
+				State.Viewing = true
+				State.TargetPlayer = targetPlayer
+				Camera.CameraType = Enum.CameraType.Follow
+				Camera.CameraSubject = targetPlayer.Character:FindFirstChild("Humanoid")
+				CreateTerminalMessage(timestamp, "[INFO]", "👁 Spectating " .. targetPlayer.Name .. " - Type /view to stop", Color3.fromRGB(80, 200, 100))
+				ShowNotification("Spectating", "Now viewing " .. targetPlayer.Name, 2)
+			else
+				CreateTerminalMessage(timestamp, "[ERROR]", "No player found: '" .. searchTerm .. "'", Color3.fromRGB(255, 100, 100))
+			end
+		else
+			if State.Viewing then
+				State.Viewing = false
+				local previousTarget = State.TargetPlayer and State.TargetPlayer.Name or "player"
+				State.TargetPlayer = nil
+				Camera.CameraType = Enum.CameraType.Custom
+				Camera.CameraSubject = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
+				CreateTerminalMessage(timestamp, "[INFO]", "Stopped spectating " .. previousTarget, Color3.fromRGB(80, 200, 100))
+			else
+				CreateTerminalMessage(timestamp, "[ERROR]", "Not spectating anyone. Use /view [player]", Color3.fromRGB(255, 100, 100))
+			end
+		end
+
+	elseif args[1] == "/bang" then
+		if args[2] then
+			local searchTerm = table.concat(args, " ", 2)
+			local targetPlayer = findPlayerByNameOrDisplayName(searchTerm)
+
+			if targetPlayer then
+				if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+					if not State.BangMode then
+						State.BangMode = true
+						State.BangTarget = targetPlayer
+
+						local humanoid = localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+						if humanoid then
+							local animation = Instance.new("Animation")
+							animation.AnimationId = "rbxassetid://148840371"
+							State.BangAnimation = humanoid:LoadAnimation(animation)
+							State.BangAnimation:Play()
+							State.BangAnimation.Looped = true
+						end
+
+						task.spawn(function()
+							while State.BangMode and State.BangTarget do
+								local targetChar = State.BangTarget.Character
+								local localChar = localPlayer.Character
+
+								if targetChar and targetChar:FindFirstChild("HumanoidRootPart") and 
+									localChar and localChar:FindFirstChild("HumanoidRootPart") then
+									local targetHRP = targetChar.HumanoidRootPart
+									local localHRP = localChar.HumanoidRootPart
+
+									local offset = targetHRP.CFrame.LookVector * -2
+									localHRP.CFrame = targetHRP.CFrame * CFrame.new(0, 0, 2)
+
+									task.wait(0.1)
+								else
+									State.BangMode = false
+									break
+								end
+							end
+
+							if State.BangAnimation then
+								State.BangAnimation:Stop()
+								State.BangAnimation = nil
+							end
+						end)
+
+						CreateTerminalMessage(timestamp, "[INFO]", "🔥 Started on " .. targetPlayer.Name, Color3.fromRGB(255, 150, 150))
+						ShowNotification("Bang Mode", "Active on " .. targetPlayer.Name, 2)
+					else
+						CreateTerminalMessage(timestamp, "[ERROR]", "Already active! Use /bang to stop", Color3.fromRGB(255, 100, 100))
+					end
+				else
+					CreateTerminalMessage(timestamp, "[ERROR]", "Player's character not loaded", Color3.fromRGB(255, 100, 100))
+				end
+			else
+				CreateTerminalMessage(timestamp, "[ERROR]", "No player found: '" .. searchTerm .. "'", Color3.fromRGB(255, 100, 100))
+			end
+		else
+			if State.BangMode then
+				local previousTarget = State.BangTarget and State.BangTarget.Name or "player"
+				State.BangMode = false
+				State.BangTarget = nil
+				if State.BangAnimation then
+					State.BangAnimation:Stop()
+					State.BangAnimation = nil
+				end
+				CreateTerminalMessage(timestamp, "[INFO]", "Stopped on " .. previousTarget, Color3.fromRGB(80, 200, 100))
+			else
+				CreateTerminalMessage(timestamp, "[ERROR]", "Not active. Use /bang [player]", Color3.fromRGB(255, 100, 100))
+			end
+		end
+
+	elseif args[1] == "/fling" then
+		if args[2] then
+			local searchTerm = table.concat(args, " ", 2)
+			local targetPlayer = findPlayerByNameOrDisplayName(searchTerm)
+
+			if targetPlayer then
+				if targetPlayer == localPlayer then
+					CreateTerminalMessage(timestamp, "[ERROR]", "Cannot fling yourself", Color3.fromRGB(255, 100, 100))
+					return
+				end
+
+				if targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+					if not running then
+						task.spawn(function()
+							flingTarget(targetPlayer)
+						end)
+						CreateTerminalMessage(timestamp, "[INFO]", "🚀 Flinging " .. targetPlayer.Name .. " - Type /fling to stop", Color3.fromRGB(80, 200, 100))
+						ShowNotification("Flinging", "Now flinging " .. targetPlayer.Name, 2)
+					else
+						CreateTerminalMessage(timestamp, "[ERROR]", "Already flinging! Use /fling to stop", Color3.fromRGB(255, 100, 100))
+					end
+				else
+					CreateTerminalMessage(timestamp, "[ERROR]", "Target player's character not loaded", Color3.fromRGB(255, 100, 100))
+				end
+			else
+				CreateTerminalMessage(timestamp, "[ERROR]", "No player found: '" .. searchTerm .. "'", Color3.fromRGB(255, 100, 100))
+			end
+		else
+			if running then
+				stopFling()
+				CreateTerminalMessage(timestamp, "[INFO]", "Stopped flinging", Color3.fromRGB(80, 200, 100))
+			else
+				CreateTerminalMessage(timestamp, "[ERROR]", "Not flinging anyone. Use /fling [player]", Color3.fromRGB(255, 100, 100))
+			end
+		end
+
+	elseif command == "/pusheen" then
+		local pusheenArt = {
+			"───────────────────────────────────────",
+			"───▐▀▄───────▄▀▌───▄▄▄▄▄▄▄─────────────",
+			"───▌▒▒▀▄▄▄▄▀▒▒▐▄▀▀▒██▒██▒▀▀▄──────────",
+			"──▐▒▒▒▒▀▒▀▒▒▒▒◎◎◎◎◎◎◎◎◎◎◎◎▒▀▄────────",
+			"──▌◎◎◎◎◎◎◎◎◎◎◎◎▒▄◎◎◎◎◎◎◎◎◎◎◎◎◎▒▌─────",
+			"▀█◎◎◎█▌◎◎█◎◎▐█◎◎▒▀◎◎◎◎◎◎◎◎◎◎◎◎◎▒▌─────",
+			"▀▌◎◎◎◎▀▒▀◎◎◎◎◎▀▀◎◎◎◎◎◎◎◎◎◎◎◎▐───▄▄",
+			"▐◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎▒▌▄█▒█",
+			"▐◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎▒█▒█▀─",
+			"▐◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎▒█▀───",
+			"▐◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎▒▌────",
+			"─▌◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎▒▐─────",
+			"─▐◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎▒▌─────",
+			"──▌◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎▒▐──────",
+			"──▐▄◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎◎▄▌──────",
+			"────▀▄▄▀▀▀▀▀▄▄▀▀▀▀▀▀▄▄▀▀▀▀▄▄▀────────"
+		}
+		CreateMultiLineTerminalMessage(timestamp, "[ASCII]", pusheenArt, Color3.fromRGB(150, 200, 100))
+
+	elseif command == "/ping" then
+		local ping = math.floor(localPlayer:GetNetworkPing() * 1000)
+		CreateTerminalMessage(timestamp, "[INFO]", "Your ping: " .. ping .. "ms", Color3.fromRGB(100, 180, 255))
+
+	elseif command == "/fps" then
+		local fps = math.floor(1 / RunService.Heartbeat:Wait())
+		CreateTerminalMessage(timestamp, "[INFO]", "Current FPS: " .. fps, Color3.fromRGB(100, 180, 255))
+
+	elseif command == "/time" then
+		local currentTime = os.date("%H:%M:%S")
+		local currentDate = os.date("%Y-%m-%d")
+		CreateTerminalMessage(timestamp, "[INFO]", "Server time: " .. currentTime .. " | Date: " .. currentDate, Color3.fromRGB(100, 180, 255))
+
+	elseif command == "/stats" then
+		local stats = game:GetService("Stats")
+		local messages = {
+			"═══════════════════════════",
+			"📊 DETAILED STATISTICS",
+			"═══════════════════════════",
+			"FPS: " .. math.floor(1 / RunService.Heartbeat:Wait()),
+			"Ping: " .. math.floor(localPlayer:GetNetworkPing() * 1000) .. "ms",
+			"Memory: " .. math.floor(stats:GetTotalMemoryUsageMb()) .. " MB",
+			"Players: " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers,
+			"Data Recv: " .. math.floor(stats.DataReceiveKbps:GetValue()) .. " Kbps",
+			"Data Send: " .. math.floor(stats.DataSendKbps:GetValue()) .. " Kbps",
+			"Physics FPS: " .. math.floor(1 / stats.HeartbeatTimeMs:GetValue()),
+			"Commands Used: " .. (State.CommandsUsed or 0),
+			"═══════════════════════════"
+		}
+		CreateMultiLineTerminalMessage(timestamp, "[STATS]", messages, Color3.fromRGB(100, 180, 255))
+
+	else
+		CreateTerminalMessage(timestamp, "[ERROR]", "Unknown command: " .. commandInput.Text .. " - Type /help", Color3.fromRGB(255, 100, 100))
+	end
+
+	commandInput.Text = ""
+	suggestionLabel.Text = ""
+end
+
+commandInput.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		SafeCall(executeCommand)
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if State.Viewing and State.TargetPlayer then
+		if not State.TargetPlayer.Parent or not State.TargetPlayer.Character or 
+			not State.TargetPlayer.Character:FindFirstChild("Humanoid") or 
+			State.TargetPlayer.Character.Humanoid.Health <= 0 then
+			State.Viewing = false
+			local previousTarget = State.TargetPlayer and State.TargetPlayer.Name or "player"
+			State.TargetPlayer = nil
+			Camera.CameraType = Enum.CameraType.Custom
+			Camera.CameraSubject = localPlayer.Character and localPlayer.Character:FindFirstChild("Humanoid")
+			CreateTerminalMessage(GetCurrentTime(), "[INFO]", 
+				"Target '" .. previousTarget .. "' no longer valid. Spectating stopped.", 
+				Color3.fromRGB(255, 100, 100))
+		end
+	end
+end)
+
+local cursor = Instance.new("TextLabel")
+cursor.Parent = TerminalFrame
+cursor.BackgroundTransparency = 1
+cursor.Position = UDim2.new(0, 5, 0, 0)
+cursor.Size = UDim2.new(0, 10, 0, 15)
+cursor.Font = Enum.Font.Code
+cursor.Text = "█"
+cursor.TextColor3 = themeColor
+cursor.TextSize = 12
+cursor.LayoutOrder = 9999999999
+
+task.spawn(function()
+	local hue = 0
+	while task.wait(0.5) do
+		cursor.TextTransparency = cursor.TextTransparency == 0 and 1 or 0
+
+		hue = (hue + 10) % 360
+		local color = Color3.fromHSV(hue/360, 0.8, 1)
+		TweenService:Create(cursor, TweenInfo.new(0.5), {
+			TextColor3 = color
+		}):Play()
+	end
+end)
+
+messagesLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+	local targetPosition = Vector2.new(0, TerminalFrame.AbsoluteCanvasSize.Y)
+	local distance = (targetPosition - TerminalFrame.CanvasPosition).Magnitude
+
+	if distance > 100 then
+		local scrollTween = TweenService:Create(TerminalFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+			CanvasPosition = targetPosition
+		})
+		scrollTween:Play()
+	else
+		TerminalFrame.CanvasPosition = targetPosition
+	end
+end)
+
+local versionLabel = Instance.new("TextLabel")
+versionLabel.Parent = SidePanel
+versionLabel.BackgroundTransparency = 1
+versionLabel.Position = UDim2.new(0, 5, 1, -20)
+versionLabel.Size = UDim2.new(1, -10, 0, 15)
+versionLabel.Font = Enum.Font.Code
+versionLabel.Text = "NerdWareOS(WIP) v1.0 | | " .. GetCurrentDate()
+versionLabel.TextColor3 = Color3.fromRGB(80, 80, 80)
+versionLabel.TextSize = 9
+versionLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+function ApplyTheme(newThemeColor)
+	if not newThemeColor or typeof(newThemeColor) ~= "Color3" then
+		warn("Invalid theme color, reverting to default")
+		newThemeColor = Color3.fromRGB(80, 255, 80)
+	end
+	themeColor = newThemeColor
+
+	TerminalFrame.ScrollBarImageColor3 = themeColor
+	logo.TextColor3 = themeColor
+	welcomeText.TextColor3 = themeColor
+	cursor.TextColor3 = themeColor
+
+	statusBox.BorderColor3 = themeColor
+	statusTitle.TextColor3 = themeColor
+
+	mainStroke.Color = themeColor
+
+	settingsPanel.BorderColor3 = themeColor
+	settingsPanelTitle.TextColor3 = themeColor
+	settingsContent.BorderColor3 = themeColor:Lerp(Color3.fromRGB(40, 90, 140), 0.5)
+	settingsContent.ScrollBarImageColor3 = themeColor
+
+	tabContainer.BorderColor3 = themeColor
+	tabTitle.TextColor3 = themeColor
+	tabContentArea.BorderColor3 = themeColor:Lerp(Color3.fromRGB(40, 90, 140), 0.5)
+
+	for _, data in pairs(tabs) do
+		data.button.BorderColor3 = themeColor
+		data.button.TextColor3 = themeColor
+		data.content.ScrollBarImageColor3 = themeColor
+	end
+
+	commandBox.BorderColor3 = themeColor
+	commandTitle.TextColor3 = themeColor
+	commandInput.BorderColor3 = themeColor
+	executeBtn.BackgroundColor3 = themeColor
+
+	local flash = Instance.new("Frame")
+	flash.Parent = MainFrame
+	flash.BackgroundColor3 = themeColor
+	flash.BackgroundTransparency = 0.7
+	flash.BorderSizePixel = 0
+	flash.Size = UDim2.new(1, 0, 1, 0)
+	flash.ZIndex = 1000
+
+	local flashCorner = Instance.new("UICorner")
+	flashCorner.CornerRadius = UDim.new(0, 8)
+	flashCorner.Parent = flash
+
+	local fadeOut = TweenService:Create(flash, TweenInfo.new(0.5), {
+		BackgroundTransparency = 1
+	})
+	fadeOut:Play()
+	fadeOut.Completed:Connect(function()
+		flash:Destroy()
+	end)
+end
+
+local function ensureGuiExists()
+	if not playerGui:FindFirstChild("NerdWareOS") then
+		ScreenGui.Parent = playerGui
+
+		MainFrame.Position = UDim2.new(0.5, -600, 0.5, -700)
+		local entranceTween = TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0.5, -600, 0.5, -350)
+		})
+		entranceTween:Play()
+
+		CreateTerminalMessage(GetCurrentTime(), "[SYSTEM]", "GUI reinitialized after respawn", Color3.fromRGB(80, 200, 100))
+	end
+end
+
+localPlayer.CharacterAdded:Connect(function()
+	task.wait(2)
+	ensureGuiExists()
+end)
+
+task.wait(0.2)
+TerminalFrame.CanvasPosition = Vector2.new(0, TerminalFrame.AbsoluteCanvasSize.Y)
+
+task.delay(1.5, function()
+	CreateTerminalMessage(GetCurrentTime(), "[SUCCESS]", "✓ All systems loaded successfully!", Color3.fromRGB(100, 255, 100))
+	ShowNotification("Welcome!", "NerdWareOS(WIP) v1.0 is ready!", 3)
+end)
+
+ensureGuiExists()
+local character = localPlayer.Character or localPlayer.CharacterAdded:Wait()
+task.wait(2)
+
+if character and character.Parent then
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		CreateTerminalMessage(GetCurrentTime(), "[SYSTEM]", "✓ Character loaded and ready", Color3.fromRGB(80, 200, 100))
+	end
+end
+
+ApplyTheme(themeColor)
+
+game:GetService("Players").PlayerRemoving:Connect(function()
+	if CloudSave.Enabled then
+		SaveToCloud()
+	end
+end)
+
+-- Auto-apply settings on character spawn
+localPlayer.CharacterAdded:Connect(function(char)
+	task.wait(1)
+	local hum = char:WaitForChild("Humanoid")
+	hum.WalkSpeed = State.WalkSpeed
+	hum.JumpPower = State.JumpPower
+end)
+
+-- GRADIENT BACKGROUNDS - Add visual depth to main frames
+local function addGradientBackground(frame, startColor, endColor)
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, startColor or Color3.fromRGB(10, 12, 15)),
+		ColorSequenceKeypoint.new(1, endColor or Color3.fromRGB(20, 25, 35))
+	})
+	gradient.Rotation = 45  -- Diagonal gradient for style
+	gradient.Parent = frame
+
+	-- Subtle animation: slight color shift on theme change
+	return gradient
+end
+
+-- Apply gradients to key frames
+local mainGradient = addGradientBackground(MainFrame)
+local sideGradient = addGradientBackground(SidePanel, Color3.fromRGB(15, 18, 25), Color3.fromRGB(25, 30, 40))
+local terminalGradient = addGradientBackground(TerminalFrame)
+
+-- Update ApplyTheme to refresh gradients
+local originalApplyTheme = ApplyTheme
+ApplyTheme = function(newThemeColor)
+	originalApplyTheme(newThemeColor)
+
+	-- Update gradient endpoints based on theme
+	if mainGradient then
+		mainGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 12, 15):Lerp(newThemeColor, 0.1)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 25, 35):Lerp(newThemeColor, 0.2))
+		})
+	end
+
+	if sideGradient then
+		sideGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(15, 18, 25):Lerp(newThemeColor, 0.05)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(25, 30, 40):Lerp(newThemeColor, 0.15))
+		})
+	end
+end
+
+-- defensive anti-tamper (safer than an infinite loop)
+if getgenv().NerdWareProtected then return end
+getgenv().NerdWareProtected = true
+
+local PROTECTION = {}
+PROTECTION.enabled = true
+PROTECTION.reportRemoteName = "ReportTamper" -- create this RemoteEvent on your server if you want reporting
+PROTECTION.maxFalsePositiveTolerance = 3 -- require multiple suspicious detections before action
+PROTECTION.suspicionCount = 0
+
+local function safe_getinfo(depth)
+	local ok, info = pcall(debug.getinfo, depth)
+	if not ok then return nil end
+	return info
+end
+
+local function suspicious_stack_detected()
+	-- check a few stack depths and tolerate common wrappers/coroutines
+	for depth = 2, 5 do
+		local info = safe_getinfo(depth)
+		if info then
+			-- info.what can be "main", "C", "Lua"
+			-- treat "C" and "Lua" as normal, but look for suspicious sources/names
+			if info.what ~= "main" and info.what ~= "Lua" and info.what ~= "C" then
+				return true
+			end
+			-- example extra heuristic: unexpected source (file name) patterns
+			if info.short_src and info.short_src:match("%p?%w+%.txt") then
+				-- uncommon pattern — mark suspicious (customize to your environment)
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function report_tamper(s)
+	-- try to report to the server neatly (non-blocking)
+	local ok, re = pcall(function() return game:GetService("ReplicatedStorage"):FindFirstChild(PROTECTION.reportRemoteName) end)
+	if ok and re and re.FireServer then
+		pcall(function() re:FireServer(s or "tamper detected") end)
+	end
+end
+
+spawn(function()
+	-- randomized interval to complicate trivial automation
+	while task.wait(45 + math.random(0,30)) do
+		if not PROTECTION.enabled then break end
+
+		local suspicious = false
+		local ok, err = pcall(function()
+			suspicious = suspicious_stack_detected()
+		end)
+
+		if not ok then
+			-- if debug.getinfo is broken/captured, that itself can be suspicious
+			suspicious = true
+		end
+
+		if suspicious then
+			PROTECTION.suspicionCount = PROTECTION.suspicionCount + 1
+		else
+			-- gradually reduce suspicion if things look normal
+			PROTECTION.suspicionCount = math.max(0, PROTECTION.suspicionCount - 1)
+		end
+
+		if PROTECTION.suspicionCount >= PROTECTION.maxFalsePositiveTolerance then
+			-- defensive response: disable protected functionality rather than freezing client
+			PROTECTION.enabled = false
+
+			-- example: zero out or replace key functions with safe no-ops
+			-- replaceYourFeature() -- implement replacement of sensitive functions here
+
+			-- report to server and log locally
+			report_tamper("suspicion threshold reached")
+
+			-- optional: add a small delay to make analysis less convenient (non-crashing)
+			for i = 1, 5 do
+				task.wait(0.2)
+			end
+
+			-- stop the monitoring thread
+			break
+		end
+	end
+end)
