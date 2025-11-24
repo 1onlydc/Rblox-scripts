@@ -1693,8 +1693,8 @@
 					end
 				end})
 				local section = column:section({name = "Other"})
-                section:label({name = "UI Bind"})
-                :keybind({name = "Menu", callback = window.set_menu_visibility, key = Enum.KeyCode.Insert, ignore = true})
+				section:label({name = "UI Bind"})
+				:keybind({callback = window.set_menu_visibility, key = Enum.KeyCode.Insert})
 				section:toggle({name = "Keybind List", flag = "keybind_list", callback = function(bool)
 					library.keybind_list_frame.Visible = bool
 				end})
@@ -4293,29 +4293,27 @@
 						cfg.active = __cached 
 						flags[cfg.flag]["active"] = __cached 
 						cfg.callback(__cached)
-					elseif tostring(input):find("Enum") then 
-						input = input.Name == "Escape" and "none" or input
-						
-						cfg.key = input or "none"	
+                    elseif tostring(input):find("Enum") then 
+                        input = input.Name == "Escape" and "none" or input
+                        
+                        cfg.key = input or "none"
 
-						local _text = keys[cfg.key] or tostring(cfg.key):gsub("Enum.", "")
-						local _text2 = (tostring(_text):gsub("KeyCode.", ""):gsub("UserInputType.", "")) or "none"
-						cfg.key_name = _text2
+                        local _text = keys[cfg.key] or tostring(cfg.key):gsub("Enum.", "")
+                        local _text2 = (tostring(_text):gsub("KeyCode.", ""):gsub("UserInputType.", "")) or "none"
+                        cfg.key_name = _text2
 
-						flags[cfg.flag]["mode"] = cfg.mode 
-						flags[cfg.flag]["key"] = cfg.key 
+                        flags[cfg.flag]["mode"] = cfg.mode 
+                        flags[cfg.flag]["key"] = cfg.key 
 
-						key_text.Text = string.lower(_text2)
+                        key_text.Text = string.lower(_text2)
+                        
+                    elseif find({"toggle", "hold", "always"}, input) then 
+                        cfg.set_mode(input)
 
-						cfg.callback(cfg.active or false)
-					elseif find({"toggle", "hold", "always"}, input) then 
-						cfg.set_mode(input)
-
-						if input == "always" then 
-							cfg.active = true 
-						end 
-
-						cfg.callback(cfg.active or false)
+                        if input == "always" then 
+                            cfg.active = true 
+                        end 
+                        
 					elseif type(input) == "table" then 
 						input.key = type(input.key) == "string" and input.key ~= "none" and library:convert_enum(input.key) or input.key
 
@@ -4387,8 +4385,9 @@
 					cfg.set_visible(cfg.open)
 				end)
 
-                element_outline.MouseButton1Down:Connect(function()
-                    key_text.Text = "none"
+				element_outline.MouseButton1Down:Connect(function()
+					task.wait()
+					key_text.Text = "none"	
 
 					if cfg.binding then return end 
 
@@ -4402,34 +4401,34 @@
 					end)
 				end)
 
-                library:connection(uis.InputBegan, function(input, game_event) 
-                    local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
+				library:connection(uis.InputBegan, function(input, game_event) 
+					local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
 
-                    if cfg.ignore_key or not game_event then 
-                        if selected_key == cfg.key then 
-                            if cfg.mode == "toggle" then 
-                                cfg.active = not cfg.active
-                                cfg.set(cfg.active)
-                            elseif cfg.mode == "hold" then 
-                                cfg.set(true)
-                            end
-                        end
-                    end
-                end)
+					if not game_event then 
+						if selected_key == cfg.key then 
+							if cfg.mode == "toggle" then 
+								cfg.active = not cfg.active
+								cfg.set(cfg.active)
+							elseif cfg.mode == "hold" then 
+								cfg.set(true)
+							end
+						end
+					end
+				end)
 
-                library:connection(uis.InputEnded, function(input, game_event) 
-                    if not cfg.ignore_key and game_event then 
-                        return 
-                    end 
+				library:connection(uis.InputEnded, function(input, game_event) 
+					if game_event then 
+						return 
+					end 
 
-                    local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
-        
-                    if selected_key == cfg.key then
-                        if cfg.mode == "hold" then 
-                            cfg.set(false)
-                        end
-                    end
-                end)
+					local selected_key = input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode or input.UserInputType
+		
+					if selected_key == cfg.key then
+						if cfg.mode == "hold" then 
+							cfg.set(false)
+						end
+					end
+				end)
 		
 				cfg.set({mode = cfg.mode, active = cfg.active, key = cfg.key})
 		
